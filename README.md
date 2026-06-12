@@ -2,7 +2,7 @@
 
 Telecom SaaS dummy data for learning `EXPLAIN (ANALYZE, BUFFERS)`.
 
-**See also:** [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md) — where to start, what to check, and the full investigation funnel.
+**See also:** [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md) — where to start, what to check, and the full investigation funnel · [CACHE.md](CACHE.md) — cold vs warm cache explained.
 
 ## Setup
 
