@@ -2,14 +2,16 @@
 
 Telecom SaaS dummy data for learning `EXPLAIN (ANALYZE, BUFFERS)`.
 
+**See also:** [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md) — where to start, what to check, and the full investigation funnel.
+
 ## Setup
 
 ```bash
 export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
 
-psql -f ~/Desktop/pg_scripts/01_schema.sql
-psql -d wavelo_lab -f ~/Desktop/pg_scripts/02_seed.sql
-psql -d wavelo_lab -f ~/Desktop/pg_scripts/03_explain_exercises.sql
+psql -f 01_schema.sql
+psql -d wavelo_lab -f 02_seed.sql
+psql -d wavelo_lab -f 03_explain_exercises.sql
 ```
 
 ## Tables
@@ -92,6 +94,6 @@ SELECT ...;
 ### Reset lab (start over)
 
 ```bash
-psql -f ~/Desktop/pg_scripts/01_schema.sql
-psql -d wavelo_lab -f ~/Desktop/pg_scripts/02_seed.sql
+psql -f 01_schema.sql
+psql -d wavelo_lab -f 02_seed.sql
 ```
