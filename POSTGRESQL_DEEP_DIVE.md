@@ -74,6 +74,36 @@ Wraparound danger zone: `xid_age` approaching `autovacuum_freeze_max_age` (defau
 - For wraparound emergencies: `VACUUM (FREEZE)` the oldest tables.
 - Keep transactions short; don't leave them open during app think-time.
 
+### When does freezing happen automatically?
+Freezing marks old tuples as "permanently visible to everyone" so their `xmin` no longer matters — this is what prevents XID wraparound. Key parameters:
+
+| Parameter | Default | Role |
+|-----------|---------|------|
+| `vacuum_freeze_min_age` | 50M | A tuple's XID must be this old before a vacuum freezes it |
+| `vacuum_freeze_table_age` | 150M | Table age past this → next vacuum becomes an **aggressive** full scan |
+| `autovacuum_freeze_max_age` | 200M | Hard limit → forces an **anti-wraparound autovacuum** even if autovacuum is off |
+
+Three ways it triggers automatically:
+
+1. **Piggyback on a normal autovacuum** — when autovacuum runs (dead-tuple threshold), it also freezes any tuple older than `vacuum_freeze_min_age` on pages it's already scanning. Mostly "free."
+2. **Aggressive vacuum** (age > `vacuum_freeze_table_age`, 150M) — scans every not-yet-frozen page, not just dirty ones; catches pages bloat-driven vacuums skip.
+3. **Anti-wraparound autovacuum** (age > `autovacuum_freeze_max_age`, 200M) — forced safety net; runs even with `autovacuum = off`, zero dead tuples, or nobody asking. **Cannot be disabled.**
+
+```
+XID age:  0 ── 50M ──────── 150M ──────── 200M ──────── ~2B
+               freeze       aggressive    anti-wraparound  EMERGENCY
+               eligible     vacuum        autovacuum FORCED shutdown
+```
+
+**Insert-only tables are the classic trap:** no dead tuples → bloat-based autovacuum never fires → XID age silently climbs until a massive freeze storms at 150M/200M. PG13+ added `autovacuum_vacuum_insert_threshold` (default 1000) to vacuum/freeze insert-heavy tables sooner.
+
+Monitor freeze pressure:
+```sql
+SELECT relname, age(relfrozenxid) AS xid_age,
+       round(100.0 * age(relfrozenxid) / 200000000, 1) AS pct_to_wraparound_av
+FROM pg_class WHERE relkind = 'r' ORDER BY xid_age DESC;
+```
+
 ---
 
 ## 1.2 WAL (Write-Ahead Log)
