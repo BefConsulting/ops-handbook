@@ -104,6 +104,53 @@ SELECT relname, age(relfrozenxid) AS xid_age,
 FROM pg_class WHERE relkind = 'r' ORDER BY xid_age DESC;
 ```
 
+### Tuning the freeze parameters (per-table / per-db / cluster)
+**Naming gotcha:** system GUCs and per-table storage params use different prefixes for the same concept.
+
+| Concept | System GUC | Per-table storage param |
+|---------|-----------|--------------------------|
+| Min age to freeze a tuple | `vacuum_freeze_min_age` | `autovacuum_freeze_min_age` |
+| Age forcing aggressive scan | `vacuum_freeze_table_age` | `autovacuum_freeze_table_age` |
+| Age forcing anti-wraparound | `autovacuum_freeze_max_age` | `autovacuum_freeze_max_age` |
+
+**Cluster-wide** (`postgresql.conf` / `ALTER SYSTEM` + `SELECT pg_reload_conf()`):
+```sql
+ALTER SYSTEM SET vacuum_freeze_min_age   = 50000000;   -- user context, reload
+ALTER SYSTEM SET vacuum_freeze_table_age = 150000000;  -- user context, reload
+ALTER SYSTEM SET autovacuum_freeze_max_age = 200000000;-- postmaster -> RESTART required
+```
+
+**Per-database** (only the two `user`-context GUCs; `autovacuum_freeze_max_age` is postmaster-only, so **not** settable per-db):
+```sql
+ALTER DATABASE wavelo_lab SET vacuum_freeze_min_age   = 20000000;
+ALTER DATABASE wavelo_lab SET vacuum_freeze_table_age = 100000000;
+```
+
+**Per-table** (use the `autovacuum_`-prefixed names; what autovacuum workers actually honor):
+```sql
+ALTER TABLE billing_events SET (
+  autovacuum_freeze_min_age   = 10000000,
+  autovacuum_freeze_table_age = 80000000,
+  autovacuum_freeze_max_age   = 150000000
+);
+-- TOAST side has its own: toast.autovacuum_freeze_min_age, etc.
+ALTER TABLE billing_events RESET (autovacuum_freeze_min_age);
+```
+
+**Key rules / gotchas:**
+- **Cap:** per-table `autovacuum_freeze_max_age` = `min(your_value, cluster value)`. You can only make a table freeze *earlier*, never raise the ceiling above the global.
+- **Who reads what:** autovacuum reads the per-table `autovacuum_freeze_*` params; a **manual `VACUUM` uses the system GUCs** and ignores table storage params. `VACUUM (FREEZE)` forces min age = 0.
+- **Trade-off:** lower freeze ages = more frequent, smaller freezes (more I/O/WAL churn, no surprise storms); higher ages = less routine work but risk of a massive forced anti-wraparound vacuum at a bad time.
+
+**When to tune:**
+
+| Goal | Tune |
+|------|------|
+| Huge insert-only table, avoid one giant storm | Lower `autovacuum_freeze_max_age` (100–150M) + set `autovacuum_vacuum_insert_threshold` |
+| Spread freeze work over time | Lower `vacuum_freeze_min_age` (10–20M) so tuples freeze opportunistically |
+| High-churn OLTP table | Fix bloat knobs first (`autovacuum_vacuum_scale_factor`); freezing rides along |
+| Large DB nearing wraparound | Lower `vacuum_freeze_table_age`; raise `autovacuum_max_workers` / lower cost delay so vacuums finish |
+
 ---
 
 ## 1.2 WAL (Write-Ahead Log)
