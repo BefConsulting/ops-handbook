@@ -125,6 +125,40 @@ Timeline:
 
 ---
 
+## `checkpoint_timeout` — the time-based trigger
+
+| | |
+|---|---|
+| **Default** | `5min` |
+| **Range** | 30s – 1d |
+| **Context** | `sighup` — change with reload, **no restart** |
+| **Role** | Maximum time between automatic checkpoints |
+
+A checkpoint fires on **whichever comes first**:
+
+| Trigger | Parameter | Counter |
+|---------|-----------|---------|
+| **Time** | `checkpoint_timeout` | `checkpoints_timed` |
+| **Volume** | `max_wal_size` | `checkpoints_req` |
+
+Trade-off:
+```
+short checkpoint_timeout -> frequent checkpoints -> faster crash recovery,
+                                                    more I/O + more full_page_writes (more WAL)
+long  checkpoint_timeout -> rare checkpoints     -> smoother I/O, less WAL,
+                                                    longer crash recovery
+```
+
+Production systems commonly **raise** it (15–30 min) with `checkpoint_completion_target = 0.9` to cut checkpoint I/O spikes and WAL amplification, accepting slightly longer recovery.
+
+```sql
+ALTER SYSTEM SET checkpoint_timeout = '15min';
+ALTER SYSTEM SET checkpoint_completion_target = 0.9;  -- spread writes over ~13.5 min
+SELECT pg_reload_conf();
+```
+
+---
+
 ## `max_wal_size` and how it relates to checkpoints
 
 `max_wal_size` is a **soft limit on how much WAL accumulates between checkpoints**. It is *not* a hard disk cap and *not* the size of a single WAL file — it's the budget of WAL allowed to pile up before Postgres says "that's enough, checkpoint now."
@@ -161,6 +195,128 @@ ALTER SYSTEM SET checkpoint_completion_target = 0.9;  -- spread flush, avoid spi
 SELECT pg_reload_conf();
 ```
 Rule of thumb: size `max_wal_size` so that under normal write load, checkpoints are driven by `checkpoint_timeout` (timed), not by volume (requested).
+
+---
+
+## Finding the current settings
+
+### See the values
+```sql
+-- Quick look
+SHOW checkpoint_timeout;
+SHOW max_wal_size;
+SHOW min_wal_size;
+SHOW checkpoint_completion_target;
+
+-- All checkpoint/WAL settings at once, with units and source
+SELECT name, setting, unit, source, context, pending_restart
+FROM pg_settings
+WHERE name IN (
+  'checkpoint_timeout', 'max_wal_size', 'min_wal_size',
+  'checkpoint_completion_target', 'wal_buffers', 'wal_compression',
+  'full_page_writes', 'shared_buffers', 'bgwriter_lru_maxpages', 'bgwriter_delay'
+)
+ORDER BY name;
+```
+
+Key columns in `pg_settings`:
+- **`setting` + `unit`** — current value and its unit (e.g. `15` `min`, `4096` `MB`).
+- **`source`** — where it came from: `default`, `configuration file`, `database`, `session`, `override`. Tells you if anything actually overrode the default.
+- **`context`** — how it can be changed: `postmaster` (restart), `sighup` (reload), `user` (per-session). `checkpoint_timeout` and `max_wal_size` are both `sighup` → reload, no restart.
+- **`pending_restart`** — `true` if you changed a restart-only setting that hasn't taken effect yet.
+
+### Where a value came from (which file/line)
+```sql
+SELECT name, setting, sourcefile, sourceline
+FROM pg_settings
+WHERE name IN ('checkpoint_timeout', 'max_wal_size');
+```
+
+### Check checkpoint behavior right now
+```sql
+-- Are checkpoints timed (good) or requested/forced (need tuning)?
+SELECT checkpoints_timed, checkpoints_req,
+       round(100.0 * checkpoints_req /
+             nullif(checkpoints_timed + checkpoints_req, 0), 1) AS pct_forced
+FROM pg_stat_bgwriter;
+```
+`pct_forced` near 0 = healthy. Climbing = `max_wal_size` too small.
+
+---
+
+## How to make best-practice changes
+
+### The golden rule
+> Tune so that under normal load, checkpoints are triggered by **`checkpoint_timeout` (timed)**, almost never by **`max_wal_size` (requested)**. Verify with `checkpoints_req ≈ 0`.
+
+### Step 1 — Measure your WAL generation rate
+Size `max_wal_size` to your actual write volume, not a guess:
+```sql
+-- Reading 1
+SELECT pg_current_wal_lsn();           -- e.g. 3/A2000000
+-- ...wait ~5 min under normal load...
+-- Reading 2, then diff:
+SELECT pg_size_pretty(pg_wal_lsn_diff('<reading2>', '<reading1>')) AS wal_in_interval;
+```
+
+### Step 2 — Size `max_wal_size`
+```
+max_wal_size  ≈  (WAL generated per checkpoint_timeout interval)  ×  2
+```
+The ×2 gives margin for bursts and the fact that the budget spans roughly two checkpoint cycles.
+Example: ~2 GB WAL per 15 min → `max_wal_size ≈ 4–6 GB`.
+
+### Step 3 — Apply (both are reloadable, no restart)
+```sql
+ALTER SYSTEM SET checkpoint_timeout = '15min';
+ALTER SYSTEM SET max_wal_size = '4GB';
+ALTER SYSTEM SET min_wal_size = '1GB';
+ALTER SYSTEM SET checkpoint_completion_target = 0.9;
+SELECT pg_reload_conf();
+```
+`ALTER SYSTEM` writes to `postgresql.auto.conf` (overrides `postgresql.conf`). To undo:
+```sql
+ALTER SYSTEM RESET max_wal_size;
+SELECT pg_reload_conf();
+```
+
+### Step 4 — Verify it worked
+```sql
+SHOW max_wal_size;                                   -- confirms new value
+SELECT name, setting, pending_restart FROM pg_settings WHERE name='max_wal_size';
+-- Later, re-check the counter trend:
+SELECT checkpoints_timed, checkpoints_req FROM pg_stat_bgwriter;
+```
+If `checkpoints_req` keeps rising, raise `max_wal_size` further and re-measure.
+
+### Recommended starting values
+| Setting | Default | General production | Write-heavy OLTP |
+|---------|---------|--------------------|------------------|
+| `checkpoint_timeout` | `5min` | `15min` | `30min` |
+| `max_wal_size` | `1GB` | `4GB` | `16GB`+ (size to write rate) |
+| `min_wal_size` | `80MB` | `1GB` | `2GB` |
+| `checkpoint_completion_target` | `0.9` | `0.9` | `0.9` |
+
+### Trade-off to remember
+```
+bigger max_wal_size + longer checkpoint_timeout
+   + fewer checkpoints, less I/O, less WAL amplification
+   - longer crash recovery, more pg_wal disk
+
+smaller max_wal_size + shorter checkpoint_timeout
+   + faster crash recovery, less WAL disk
+   - frequent checkpoints, I/O spikes, more full_page_writes
+```
+Bound `checkpoint_timeout` by your **RTO** (recovery time budget), and provision **`pg_wal` disk well above `max_wal_size`** (it's a soft limit and can be exceeded under load or with inactive replication slots).
+
+### Checklist
+1. Raise `checkpoint_timeout` to ~15 min (or align to RTO).
+2. Measure WAL/interval, set `max_wal_size` ≈ 2× that.
+3. Leave `checkpoint_completion_target = 0.9`.
+4. Set `min_wal_size` to ~1–2 GB to reduce file churn.
+5. `SELECT pg_reload_conf();` then confirm with `SHOW`.
+6. Watch `checkpoints_req` stay near 0 in `pg_stat_bgwriter`; re-tune if not.
+7. Ensure `pg_wal` disk headroom over `max_wal_size`.
 
 ---
 
