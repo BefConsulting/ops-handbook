@@ -125,6 +125,83 @@ Timeline:
 
 ---
 
+## `max_wal_size` and how it relates to checkpoints
+
+`max_wal_size` is a **soft limit on how much WAL accumulates between checkpoints**. It is *not* a hard disk cap and *not* the size of a single WAL file — it's the budget of WAL allowed to pile up before Postgres says "that's enough, checkpoint now."
+
+### A checkpoint is triggered by whichever comes first:
+```
+TIME:    checkpoint_timeout elapses (default 5 min)          -> "timed" checkpoint
+VOLUME:  WAL written since last checkpoint nears max_wal_size -> "requested" checkpoint
+```
+
+- Hit the **timer** first → counts in `checkpoints_timed`.
+- Hit the **WAL volume** first → counts in `checkpoints_req` (a *demand/forced* checkpoint).
+
+### Why the relationship matters
+A checkpoint must flush all dirty buffers — that's an I/O burst. So you want checkpoints **spaced out and predictable**, ideally driven by the timer, not by WAL filling up:
+
+- **`checkpoints_req` high vs `checkpoints_timed`** → WAL is filling faster than `checkpoint_timeout`, forcing frequent demand checkpoints. Frequent checkpoints = more `full_page_writes` (the first change to a page after a checkpoint writes the whole page to WAL), which generates *even more* WAL → a vicious cycle. **Fix: raise `max_wal_size`.**
+- **`max_wal_size` too small** → constant forced checkpoints, I/O spikes, WAL amplification.
+- **`max_wal_size` too large** → fewer checkpoints (good for steady-state I/O) but **longer crash recovery** (more WAL to replay) and more disk used by `pg_wal`.
+
+So `max_wal_size` is the main knob to **trade checkpoint frequency against crash-recovery time and disk usage**:
+
+```
+small max_wal_size  ->  frequent checkpoints  ->  fast recovery, more I/O churn, WAL amplification
+large max_wal_size  ->  rare checkpoints      ->  slow recovery, smoother I/O, more pg_wal disk
+```
+
+### Practical tuning
+```sql
+-- If checkpoints_req is climbing, give WAL more room
+ALTER SYSTEM SET max_wal_size = '4GB';
+ALTER SYSTEM SET checkpoint_timeout = '15min';
+ALTER SYSTEM SET checkpoint_completion_target = 0.9;  -- spread flush, avoid spikes
+SELECT pg_reload_conf();
+```
+Rule of thumb: size `max_wal_size` so that under normal write load, checkpoints are driven by `checkpoint_timeout` (timed), not by volume (requested).
+
+---
+
+## Reading `pg_stat_bgwriter` (interpretation cheat-sheet)
+
+```sql
+SELECT * FROM pg_stat_bgwriter;
+```
+
+| Field | Meaning | What to watch for |
+|-------|---------|-------------------|
+| `checkpoints_timed` | Checkpoints fired by `checkpoint_timeout` | Want this to dominate |
+| `checkpoints_req` | Checkpoints forced by `max_wal_size` (demand) | **High vs timed → raise `max_wal_size`** |
+| `checkpoint_write_time` | Total ms writing during checkpoints | Large is fine — it's spread on purpose |
+| `checkpoint_sync_time` | Total ms in `fsync` at checkpoint end | Spikes → slow storage |
+| `buffers_checkpoint` | Dirty pages written by checkpointer | Planned writes (good) |
+| `buffers_clean` | Dirty pages written by the **background writer** | 0 = bgwriter idle/too conservative |
+| `maxwritten_clean` | Times bgwriter stopped early (hit its cap) | High → raise `bgwriter_lru_maxpages` |
+| `buffers_backend` | Dirty pages **backends flushed themselves** | High proportion → cache pressure; make bgwriter aggressive / raise `shared_buffers` |
+| `buffers_backend_fsync` | Times a backend did its own fsync | **Must be ~0**; >0 = fsync queue overflow (serious) |
+| `buffers_alloc` | Buffers allocated | Cache demand gauge |
+
+### Healthy picture (the ideal)
+- `checkpoints_req = 0` (or ≪ `checkpoints_timed`) → WAL not outpacing the timer; `max_wal_size` sized fine.
+- `buffers_backend_fsync = 0` → no fsync-queue pressure.
+- Most writes come from `buffers_checkpoint` (planned), not `buffers_backend`.
+
+### Pressure signals & fixes
+| Signal | Likely fix |
+|--------|------------|
+| `checkpoints_req` rising | Raise `max_wal_size`, raise `checkpoint_timeout` |
+| `buffers_backend` large share + `buffers_clean=0` | Make bgwriter aggressive (`bgwriter_lru_maxpages`↑, `bgwriter_delay`↓); raise `shared_buffers` |
+| `buffers_backend_fsync > 0` | Investigate I/O subsystem; increase `shared_buffers`; check storage |
+| `maxwritten_clean` high | Raise `bgwriter_lru_maxpages` |
+
+> Note: a high `buffers_backend` share is **normal during one-off bulk loads** (a big insert burst fills `shared_buffers` faster than the gentle bgwriter reacts). It's only a concern if it persists under steady OLTP load.
+
+**Version note:** on **PG16** these all live in `pg_stat_bgwriter`. In **PG17+**, `buffers_backend` / `buffers_backend_fsync` moved to `pg_stat_io`, and checkpoint counters moved to `pg_stat_checkpointer`.
+
+---
+
 ## Analogy
 
 A busy kitchen:
