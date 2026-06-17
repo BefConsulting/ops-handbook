@@ -8,6 +8,7 @@ Telecom SaaS dummy data for learning `EXPLAIN (ANALYZE, BUFFERS)`.
 - [WAL_AND_CHECKPOINTS.md](WAL_AND_CHECKPOINTS.md) — WAL vs dirty buffers, checkpoints, crash recovery
 - [REPLICATION.md](REPLICATION.md) — physical/logical replication, lag, troubleshooting, HA best practices
 - [CACHE.md](CACHE.md) — cold vs warm cache explained
+- [scripts/](scripts/) — ready-to-run monitoring `.sql` files (`\i scripts/activity.sql`, etc.)
 
 ## Setup
 
