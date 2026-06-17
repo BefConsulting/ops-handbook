@@ -44,3 +44,7 @@ ops-handbook/
 | jenkins | Scaffolded — ready for content |
 
 Start with [databases/README.md](databases/README.md).
+
+## Interview prep
+
+[prep.md](prep.md) — a role-focused study guide mapping required skills (PostgreSQL internals, HA/failover, performance, PITR, observability, distributed systems, Linux, IaC, security) to talking points, likely questions, and links into this handbook.
