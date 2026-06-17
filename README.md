@@ -7,6 +7,7 @@ Telecom SaaS dummy data for learning `EXPLAIN (ANALYZE, BUFFERS)`.
 - [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md) — where to start, what to check, the full investigation funnel
 - [WAL_AND_CHECKPOINTS.md](WAL_AND_CHECKPOINTS.md) — WAL vs dirty buffers, checkpoints, crash recovery
 - [HA_AND_DR.md](HA_AND_DR.md) — replication, failover automation (Patroni/DCS), disaster recovery & PITR
+- [PATRONI.md](PATRONI.md) — hands-on: build a 3-node Patroni HA cluster on local macOS (PG16)
 - [CACHE.md](CACHE.md) — cold vs warm cache explained
 - [scripts/](scripts/) — ready-to-run monitoring `.sql` files (`\i scripts/activity.sql`, etc.)
 

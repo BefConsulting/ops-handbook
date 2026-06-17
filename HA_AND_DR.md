@@ -2,7 +2,7 @@
 
 Focus: **replication, automatic failover, and disaster recovery** — how to keep PostgreSQL available and recoverable at scale. Highly relevant to the Wavelo DBRE role (PostgreSQL at scale, HA, multi-region).
 
-**See also:** [POSTGRESQL_DEEP_DIVE.md](POSTGRESQL_DEEP_DIVE.md) §3 (HA & scaling) · [WAL_AND_CHECKPOINTS.md](WAL_AND_CHECKPOINTS.md) · [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md)
+**See also:** [PATRONI.md](PATRONI.md) (hands-on Patroni HA lab) · [POSTGRESQL_DEEP_DIVE.md](POSTGRESQL_DEEP_DIVE.md) §3 (HA & scaling) · [WAL_AND_CHECKPOINTS.md](WAL_AND_CHECKPOINTS.md) · [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md)
 
 ---
 
