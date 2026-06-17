@@ -2,6 +2,7 @@
 -- Run in psql:  \i scripts/indexes.sql
 
 \echo '=== Seq-scan pressure: large tables scanned more than indexed (missing index?) ==='
+\echo '    look: high seq_scan + high avg_rows_per_seqscan on a big table = likely a missing index'
 SELECT relname, seq_scan, idx_scan, n_live_tup,
        seq_tup_read,
        round(seq_tup_read::numeric / nullif(seq_scan, 0), 0) AS avg_rows_per_seqscan
@@ -13,6 +14,7 @@ LIMIT 20;
 
 \echo ''
 \echo '=== Unused indexes (never scanned) — candidates to drop ==='
+\echo '    look: idx_scan=0 = pure write overhead with no read benefit (verify before dropping)'
 SELECT s.relname AS table_name,
        s.indexrelname AS index_name,
        s.idx_scan,
@@ -26,6 +28,7 @@ ORDER BY pg_relation_size(s.indexrelid) DESC;
 
 \echo ''
 \echo '=== Largest indexes ==='
+\echo '    look: large size with low idx_scan = wasted space and write cost'
 SELECT schemaname, relname AS table_name, indexrelname AS index_name,
        idx_scan,
        pg_size_pretty(pg_relation_size(indexrelid)) AS index_size

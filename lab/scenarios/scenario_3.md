@@ -56,7 +56,7 @@ FOR each row in outer (customers):
 
 Best when the outer side is **tiny** (1 row here) and the inner side has an **index** on the join key (`customer_id`).
 
-**Interview line:** *"Nested loop is perfect when outer cardinality is 1 and inner is index-backed — O(1) probe per outer row."*
+**Key point:** *"Nested loop is perfect when outer cardinality is 1 and inner is index-backed — O(1) probe per outer row."*
 
 ---
 
@@ -176,7 +176,7 @@ You'd likely see **Hash Join** or **Nested Loop with loops=10000** — joining a
 
 ---
 
-## Key takeaways for interviews
+## Key takeaways
 
 1. **Nested Loop = for each outer row, probe inner** — great when outer is small
 2. **`loops=` on inner node** — multiply by outer rows to gauge cost

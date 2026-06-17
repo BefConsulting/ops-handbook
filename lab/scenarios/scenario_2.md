@@ -83,7 +83,7 @@ You might expect a plain **Index Scan**. PostgreSQL chose **Bitmap Index Scan** 
 
 With 5 regions evenly distributed, `US-EAST` ≈ 20% — right in bitmap territory.
 
-**Interview line:** *"The planner didn't pick a simple Index Scan because we're fetching a large fraction of the table. Bitmap batching reduces random heap access."*
+**Key point:** *"The planner didn't pick a simple Index Scan because we're fetching a large fraction of the table. Bitmap batching reduces random heap access."*
 
 ---
 
@@ -142,7 +142,7 @@ The big difference at this scale is **time**, not pages touched. On a much large
 | Bitmap Heap Scan | `shared hit=104` | Table pages from RAM (warm from Scenario 1) |
 | Bitmap Heap Scan | `shared read=4` | A few heap pages not yet cached |
 
-**Interview line:** *"Index was cold (shared read on index scan). Heap was warm from the prior seq scan. In production I'd look at both plan shape and buffer hits vs reads under realistic cache conditions."*
+**Key point:** *"Index was cold (shared read on index scan). Heap was warm from the prior seq scan. In production I'd look at both plan shape and buffer hits vs reads under realistic cache conditions."*
 
 ---
 
@@ -188,7 +188,7 @@ Look for `Index Scan using idx_customers_region` instead of Bitmap.
 
 ---
 
-## Key takeaways for interviews
+## Key takeaways
 
 1. **Adding an index doesn't always mean Index Scan** — Bitmap and Seq Scan are still valid choices
 2. **Compare estimated vs actual rows** — here both say 2,000 ✓

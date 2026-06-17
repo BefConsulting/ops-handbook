@@ -2,7 +2,7 @@
 
 Focus: **how to find current settings, pick optimal values, and troubleshoot checkpoint/WAL problems.** Basics are condensed up top for reference.
 
-**See also:** [POSTGRESQL_DEEP_DIVE.md](POSTGRESQL_DEEP_DIVE.md) §1.2 · [CACHE.md](CACHE.md) · [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md)
+**See also:** [deep-dive.md](deep-dive.md) §1.2 · [cache.md](cache.md) · [performance-analysis.md](performance-analysis.md)
 
 ---
 
@@ -193,6 +193,6 @@ SELECT pg_size_pretty(sum(size)) FROM pg_ls_waldir();
 
 ---
 
-## One-liner for the interview
+## Summary
 
 > *"I size `max_wal_size` to ~2× the WAL generated per `checkpoint_timeout` interval (measured with `pg_wal_lsn_diff`) and set `checkpoint_timeout` to ~15 min with `checkpoint_completion_target=0.9`. The goal is timer-driven checkpoints — I verify `checkpoints_req` stays near zero in `pg_stat_bgwriter`. It's a trade-off between checkpoint I/O and crash-recovery time, bounded by RTO and `pg_wal` disk headroom. For 'WAL filling the disk' I check inactive replication slots and archiving first."*

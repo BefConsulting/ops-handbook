@@ -64,7 +64,7 @@ PostgreSQL read **10,000 rows** and threw away **8,000** after the filter.
 
 That means it did work on rows it didn't need. On a small table (10k) that's fine (~12 ms). On millions of rows this would be painful.
 
-**Interview line:** *"Seq scan with a high 'Rows Removed by Filter' on a large table usually means we need an index or a more selective predicate."*
+**Key point:** *"Seq scan with a high 'Rows Removed by Filter' on a large table usually means we need an index or a more selective predicate."*
 
 ---
 
@@ -79,7 +79,7 @@ Buffers: shared hit=104
 
 The whole table was already warm in cache, so this was as fast as a seq scan gets.
 
-**Interview line:** *"All buffer hits — table was cached. I'd still look at the plan shape, not just speed, because cold cache or production scale changes the story."*
+**Key point:** *"All buffer hits — table was cached. I'd still look at the plan shape, not just speed, because cold cache or production scale changes the story."*
 
 ---
 

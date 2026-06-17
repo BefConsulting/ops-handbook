@@ -2,7 +2,7 @@
 
 A hands-on guide to building a 3-node Patroni cluster **on a single Mac** using your Homebrew PostgreSQL 16, with etcd as the DCS and HAProxy for client routing. Then test automatic failover.
 
-**See also:** [HA_AND_DR.md](HA_AND_DR.md) (concepts: failover, split-brain, DCS) · [POSTGRESQL_DEEP_DIVE.md](POSTGRESQL_DEEP_DIVE.md) §3
+**See also:** [ha-and-dr.md](ha-and-dr.md) (concepts: failover, split-brain, DCS) · [deep-dive.md](deep-dive.md) §3
 
 > This runs three Postgres instances on one machine (ports 5432/5433/5434), each managed by its own Patroni agent, all coordinating through one etcd. It's a learning topology — in production each node is a separate host (ideally separate AZ/region).
 
@@ -65,7 +65,7 @@ brew services stop postgresql@16
 mkdir -p ~/patroni-lab/{node1,node2,node3}
 ```
 
-> Your existing `wavelo_lab` data (in `/opt/homebrew/var/postgresql@16`) is untouched — Patroni uses separate data dirs under `~/patroni-lab`. Restart the brew service later to get it back.
+> Your existing `pg_lab` data (in `/opt/homebrew/var/postgresql@16`) is untouched — Patroni uses separate data dirs under `~/patroni-lab`. Restart the brew service later to get it back.
 
 ---
 
@@ -94,7 +94,7 @@ Create three YAML files. They differ only in `name`, the two ports (`restapi`, `
 
 ### `~/patroni-lab/node1.yml`
 ```yaml
-scope: wavelo-ha
+scope: pg_ha
 namespace: /service/
 name: node1
 
@@ -209,7 +209,7 @@ What happens: node1 runs `initdb`, creates users, becomes **leader** and grabs t
 patronictl -c ~/patroni-lab/node1.yml list
 ```
 ```
-+ Cluster: wavelo-ha --------+---------+---------+----+-----------+
++ Cluster: pg_ha --------+---------+---------+----+-----------+
 | Member | Host           | Role    | State   | TL | Lag in MB |
 +--------+----------------+---------+---------+----+-----------+
 | node1  | 127.0.0.1:5432 | Leader  | running |  1 |           |
@@ -285,7 +285,7 @@ So when a failover happens, the `/primary` check moves to the new leader and HAP
 
 **The stats page** (`http://127.0.0.1:7000/`) is just a monitoring convenience showing UP/DOWN per pool — routing works whether or not you open it.
 
-**Alternatives to HAProxy** (interview-worthy): PgBouncer (adds pooling), a floating Virtual IP (VIP) + keepalived, or `libpq` multi-host strings with `target_session_attrs=read-write` (client picks the writable host, no proxy). HAProxy itself is a single point of failure, so production runs **two HAProxy instances** behind a VIP.
+**Alternatives to HAProxy** (worth knowing): PgBouncer (adds pooling), a floating Virtual IP (VIP) + keepalived, or `libpq` multi-host strings with `target_session_attrs=read-write` (client picks the writable host, no proxy). HAProxy itself is a single point of failure, so production runs **two HAProxy instances** behind a VIP.
 
 ### `~/patroni-lab/haproxy.cfg`
 ```
@@ -348,8 +348,8 @@ HAProxy stats dashboard: http://127.0.0.1:7000/. After a failover, HAProxy follo
 patronictl -c ~/patroni-lab/node1.yml list                 # cluster state
 patronictl -c ~/patroni-lab/node1.yml switchover           # planned role swap
 patronictl -c ~/patroni-lab/node1.yml failover             # force failover
-patronictl -c ~/patroni-lab/node1.yml restart wavelo-ha node2
-patronictl -c ~/patroni-lab/node1.yml reinit  wavelo-ha node2   # rebuild a replica
+patronictl -c ~/patroni-lab/node1.yml restart pg_ha node2
+patronictl -c ~/patroni-lab/node1.yml reinit  pg_ha node2   # rebuild a replica
 patronictl -c ~/patroni-lab/node1.yml edit-config          # change DCS-managed params
 patronictl -c ~/patroni-lab/node1.yml pause                # stop automatic failover (maintenance)
 patronictl -c ~/patroni-lab/node1.yml resume
@@ -384,11 +384,11 @@ brew services start postgresql@16
 
 ---
 
-## Mapping to the interview
+## Concept mapping
 
 | Concept | Where it shows up here |
 |---------|------------------------|
-| DCS / consensus / leader key | etcd holds `/service/wavelo-ha/...`; only key holder is primary |
+| DCS / consensus / leader key | etcd holds `/service/pg_ha/...`; only key holder is primary |
 | Automatic failover | Kill leader → Patroni promotes most caught-up replica |
 | Split-brain prevention | etcd leader key + `ttl`; (prod: add watchdog/STONITH) |
 | `pg_rewind` re-attach | Old leader rejoins on new timeline without full rebuild |
@@ -399,6 +399,6 @@ brew services start postgresql@16
 
 ---
 
-## One-liner for the interview
+## Summary
 
 > *"I set up Patroni with etcd as the DCS and HAProxy for routing: each Postgres node runs a Patroni agent that registers in etcd, and only the holder of the etcd leader key can be primary. On leader failure Patroni promotes the most caught-up replica, bumps the timeline, and HAProxy follows via the `/primary` REST health check; the old node rejoins with `pg_rewind`. I tune `ttl`/`loop_wait` to balance fast detection against flapping, and in production I'd use a 3- or 5-node etcd quorum plus a watchdog for fencing."*

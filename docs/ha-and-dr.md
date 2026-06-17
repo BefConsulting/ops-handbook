@@ -1,8 +1,8 @@
 # PostgreSQL High Availability & Disaster Recovery
 
-Focus: **replication, automatic failover, and disaster recovery** — how to keep PostgreSQL available and recoverable at scale. Highly relevant to the Wavelo DBRE role (PostgreSQL at scale, HA, multi-region).
+Focus: **replication, automatic failover, and disaster recovery** — how to keep PostgreSQL available and recoverable at scale (HA, multi-region).
 
-**See also:** [PATRONI.md](PATRONI.md) (hands-on Patroni HA lab) · [POSTGRESQL_DEEP_DIVE.md](POSTGRESQL_DEEP_DIVE.md) §3 (HA & scaling) · [WAL_AND_CHECKPOINTS.md](WAL_AND_CHECKPOINTS.md) · [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md)
+**See also:** [patroni.md](patroni.md) (hands-on Patroni HA lab) · [deep-dive.md](deep-dive.md) §3 (HA & scaling) · [wal-and-checkpoints.md](wal-and-checkpoints.md) · [performance-analysis.md](performance-analysis.md)
 
 ---
 
@@ -146,7 +146,7 @@ FROM pg_replication_slots;
 - **`active = false`** on a slot = **danger**: it's retaining WAL for a consumer that isn't there → `pg_wal` grows until the disk fills.
 - **`wal_status = 'lost'`** = required WAL was already removed; the replica can't catch up.
 
-(Ready-to-run versions in [scripts/replication.sql](scripts/replication.sql).)
+(Ready-to-run versions in [../scripts/replication.sql](../scripts/replication.sql).)
 
 ---
 
@@ -225,6 +225,6 @@ With Patroni, also: `patronictl list` (cluster state/roles/lag) and the Patroni 
 
 ---
 
-## One-liner for the interview
+## Summary
 
 > *"For HA I run streaming replicas managed by **Patroni with an etcd/Consul DCS**: it health-checks the primary, elects the most caught-up standby, fences the old node via watchdog to prevent split-brain, promotes with `pg_promote`, and clients follow via HAProxy hitting Patroni's REST API. I tune `ttl`/`loop_wait` to balance fast detection against flapping, and re-attach the old primary with `pg_rewind`. HA covers node failure, but for DR — region loss or a bad `DELETE` that replication copies everywhere — I rely on pgBackRest/WAL-G WAL archiving for PITR, a cross-region copy under 3-2-1, and regularly tested restores measured against RTO."*

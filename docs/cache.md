@@ -59,7 +59,7 @@ EXPLAIN (ANALYZE, BUFFERS) SELECT ...;
 EXPLAIN (ANALYZE, BUFFERS) SELECT ...;
 ```
 
-**Interview trap:** *"My query got faster the second time!"* — That's just the cache warming up, not a real optimization. To compare fairly, run a query **2–3 times** and look at the **warm** number, or deliberately test cold performance.
+**Common misconception:** *"My query got faster the second time!"* — That's just the cache warming up, not a real optimization. To compare fairly, run a query **2–3 times** and look at the **warm** number, or deliberately test cold performance.
 
 ---
 
@@ -91,10 +91,10 @@ EXPLAIN (ANALYZE, BUFFERS) SELECT ...;
 
 ---
 
-## One-liner for the interview
+## Summary
 
 > *"Cold cache means the data isn't in `shared_buffers` or OS cache yet, so Postgres reads from disk — you see it as `shared read` in EXPLAIN BUFFERS. Warm cache is `shared hit`. I always run a query a few times before judging it, because the first run pays the cold-read cost."*
 
 ---
 
-**See also:** [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md) · [README.md](README.md) · [scenario_2.md](scenario_2.md)
+**See also:** [performance-analysis.md](performance-analysis.md) · [../README.md](../README.md) · [scenario_2.md](../lab/scenarios/scenario_2.md)

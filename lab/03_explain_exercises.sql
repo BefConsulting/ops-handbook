@@ -1,8 +1,8 @@
 -- EXPLAIN (ANALYZE, BUFFERS) exercises
--- Run: psql -d wavelo_lab -f ~/Desktop/pg_scripts/03_explain_exercises.sql
+-- Run from the lab/ folder: psql -d pg_lab -f 03_explain_exercises.sql
 -- Or open in psql and run one block at a time.
 
-\c wavelo_lab
+\c pg_lab
 
 -- ============================================================
 -- EXERCISE 1: Sequential Scan (no useful index)

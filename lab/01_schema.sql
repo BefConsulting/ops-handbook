@@ -1,10 +1,10 @@
--- Wavelo-style telecom SaaS schema for EXPLAIN practice
--- Run: psql -f ~/Desktop/pg_scripts/01_schema.sql
+-- Sample SaaS schema (customers / subscriptions / billing) for EXPLAIN practice
+-- Run from the lab/ folder: psql -f 01_schema.sql
 
-DROP DATABASE IF EXISTS wavelo_lab;
-CREATE DATABASE wavelo_lab;
+DROP DATABASE IF EXISTS pg_lab;
+CREATE DATABASE pg_lab;
 
-\c wavelo_lab
+\c pg_lab
 
 CREATE TABLE customers (
     id          BIGSERIAL PRIMARY KEY,

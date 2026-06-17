@@ -15,7 +15,7 @@ Ask:
 | **What changed?** | Schema, data volume, config, hardware? |
 | **Who feels it?** | Users, batch jobs, replication lag? |
 
-**Interview line:** *"I scope the problem before tuning — is it CPU, I/O, locks, connections, or one bad query?"*
+**Key point:** *"I scope the problem before tuning — is it CPU, I/O, locks, connections, or one bad query?"*
 
 ---
 
@@ -202,7 +202,7 @@ Optional:
 SET track_io_timing = on;   -- I/O timing per node
 ```
 
-See [README.md](README.md) for EXPLAIN field reference and [scenario_1.md](scenario_1.md)–[scenario_3.md](scenario_3.md) for worked examples.
+See [../lab/README.md](../lab/README.md) for the EXPLAIN field reference and [scenario_1.md](../lab/scenarios/scenario_1.md)–[scenario_3.md](../lab/scenarios/scenario_3.md) for worked examples.
 
 ---
 
@@ -244,19 +244,19 @@ log_min_duration_statement = 1000   # log queries > 1s
 
 | Scenario | Real-world equivalent |
 |----------|----------------------|
-| [scenario_1.md](scenario_1.md) — Seq Scan | `pg_stat_user_tables.seq_scan` high, no index |
-| [scenario_2.md](scenario_2.md) — Bitmap Scan | Index exists, moderate selectivity |
-| [scenario_3.md](scenario_3.md) — Nested Loop | Point lookup + FK join (good pattern) |
+| [scenario_1.md](../lab/scenarios/scenario_1.md) — Seq Scan | `pg_stat_user_tables.seq_scan` high, no index |
+| [scenario_2.md](../lab/scenarios/scenario_2.md) — Bitmap Scan | Index exists, moderate selectivity |
+| [scenario_3.md](../lab/scenarios/scenario_3.md) — Nested Loop | Point lookup + FK join (good pattern) |
 | Exercise 4 — Hash Join | Full/analytical join, no selective filter |
 | Exercise 5–6 — Sort/Aggregate | Heavy GROUP BY, needs index or rewrite |
 | Exercise 7 — `lower(email)` | Function on column → index can't be used |
 | Exercise 8 — Bitmap | Multi-column filter |
 
-Run exercises: `psql -d wavelo_lab -f 03_explain_exercises.sql`
+Run exercises: `psql -d pg_lab -f ../lab/03_explain_exercises.sql`
 
 ---
 
-## 9. Interview one-liner framework
+## 9. Summary framework
 
 > *"I start with scope and symptoms, check connections and locks, use `pg_stat_statements` to find the expensive queries, then `EXPLAIN (ANALYZE, BUFFERS)` on those. I look at plan shape, estimate vs actual rows, buffer hits vs reads, and wait events. Then I fix the root cause — index, query rewrite, vacuum, or config — and verify with before/after metrics."*
 
@@ -264,7 +264,7 @@ Run exercises: `psql -d wavelo_lab -f 03_explain_exercises.sql`
 
 ## 10. Try it locally
 
-In `wavelo_lab`:
+In `pg_lab`:
 
 ```sql
 -- What's slow? (requires pg_stat_statements enabled)

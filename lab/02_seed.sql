@@ -1,7 +1,7 @@
 -- Populate with enough rows to make query plans interesting
--- Run: psql -d wavelo_lab -f ~/Desktop/pg_scripts/02_seed.sql
+-- Run from the lab/ folder: psql -d pg_lab -f 02_seed.sql
 
-\c wavelo_lab
+\c pg_lab
 
 -- ~10k customers
 INSERT INTO customers (email, region, status, created_at)

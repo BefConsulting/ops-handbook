@@ -7,6 +7,7 @@
 --   3) CREATE EXTENSION pg_stat_statements;
 
 \echo '=== Top 15 queries by TOTAL execution time ==='
+\echo '    look: top rows consume the most cumulative time = biggest optimization wins (often high-calls)'
 SELECT calls,
        round(total_exec_time::numeric, 1)  AS total_ms,
        round(mean_exec_time::numeric, 2)   AS mean_ms,
@@ -20,6 +21,7 @@ LIMIT 15;
 
 \echo ''
 \echo '=== Top 15 queries by MEAN execution time (slowest per call) ==='
+\echo '    look: slowest single calls; low cache_hit_pct here points to an I/O-bound query'
 SELECT calls,
        round(mean_exec_time::numeric, 2)  AS mean_ms,
        round(total_exec_time::numeric, 1) AS total_ms,

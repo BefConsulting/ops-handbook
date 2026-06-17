@@ -1,6 +1,6 @@
-# PostgreSQL Deep Dive — DBRE Interview Prep
+# PostgreSQL Deep Dive
 
-Four core areas for a Senior Database Reliability Engineer role:
+Four core areas for database reliability engineering:
 
 1. [Core Internal Concepts](#1-core-internal-concepts) — MVCC, WAL, vacuum, bloat, the planner
 2. [Advanced Performance Tuning](#2-advanced-performance-tuning)
@@ -122,8 +122,8 @@ ALTER SYSTEM SET autovacuum_freeze_max_age = 200000000;-- postmaster -> RESTART 
 
 **Per-database** (only the two `user`-context GUCs; `autovacuum_freeze_max_age` is postmaster-only, so **not** settable per-db):
 ```sql
-ALTER DATABASE wavelo_lab SET vacuum_freeze_min_age   = 20000000;
-ALTER DATABASE wavelo_lab SET vacuum_freeze_table_age = 100000000;
+ALTER DATABASE pg_lab SET vacuum_freeze_min_age   = 20000000;
+ALTER DATABASE pg_lab SET vacuum_freeze_table_age = 100000000;
 ```
 
 **Per-table** (use the `autovacuum_`-prefixed names; what autovacuum workers actually honor):
@@ -174,7 +174,7 @@ Two representations of the same change: **WAL makes it durable; dirty buffers ma
 - **On crash:** the lost-from-RAM dirty buffers are reconstructed by **replaying WAL** (REDO) → no committed data lost.
 - **Checkpoint:** flushes all dirty buffers to data files and advances the redo point so older WAL can be recycled; checkpoint frequency bounds crash-recovery time.
 
-Full walkthrough (diagrams, checkpoint params, monitoring): **[WAL_AND_CHECKPOINTS.md](WAL_AND_CHECKPOINTS.md)**.
+Full walkthrough (diagrams, checkpoint params, monitoring): **[wal-and-checkpoints.md](wal-and-checkpoints.md)**.
 
 Key terms:
 - **LSN (Log Sequence Number)** — a byte position in the WAL stream; how Postgres tracks progress and replication lag.
@@ -444,7 +444,7 @@ Single primary = single point of failure. HA = automatic detection + promotion o
 - **Connection scaling** — PgBouncer.
 - **Partitioning** — manage huge tables (3.x / 2.5).
 - **Sharding** — horizontal split across nodes: app-level, or **Citus** extension. Adds cross-shard query/transaction complexity.
-- **CDC / event streaming** — **Debezium** reading logical replication → **Kafka** for downstream systems (very relevant to Wavelo's event-driven architecture).
+- **CDC / event streaming** — **Debezium** reading logical replication → **Kafka** for downstream systems (common in event-driven architectures).
 
 ---
 
@@ -472,7 +472,7 @@ Roles are users **and** groups. Grant the **least privilege** needed.
 
 ```sql
 CREATE ROLE app_read NOLOGIN;
-GRANT CONNECT ON DATABASE wavelo_lab TO app_read;
+GRANT CONNECT ON DATABASE pg_lab TO app_read;
 GRANT USAGE ON SCHEMA public TO app_read;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO app_read;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO app_read;  -- future tables
@@ -515,17 +515,17 @@ CREATE POLICY tenant_isolation ON billing_events
 
 ---
 
-## Quick interview map (Wavelo DBRE)
+## Quick reference map
 
-| They ask about... | Section |
-|-------------------|---------|
-| "Walk me through MVCC / why bloat happens" | 1.1, 1.4 |
-| "WAL, replication slots filling disk" | 1.2, 3.2 |
-| "Autovacuum tuning at scale" | 1.3 |
-| "A query got slow — how do you debug?" | 2.1, `PERFORMANCE_ANALYSIS.md` |
-| "Index strategy / work_mem" | 2.2, 2.3 |
-| "Design HA / automatic failover" | 3.3 (Patroni, DCS, split-brain) |
-| "Backup strategy / PITR" | 3.4 |
-| "Multi-tenant isolation / security" | 4.2, 4.3 |
+| Topic | Section |
+|-------|---------|
+| MVCC / why bloat happens | 1.1, 1.4 |
+| WAL, replication slots filling disk | 1.2, 3.2 |
+| Autovacuum tuning at scale | 1.3 |
+| Debugging a slow query | 2.1, `performance-analysis.md` |
+| Index strategy / work_mem | 2.2, 2.3 |
+| HA / automatic failover | 3.3 (Patroni, DCS, split-brain) |
+| Backup strategy / PITR | 3.4 |
+| Multi-tenant isolation / security | 4.2, 4.3 |
 
-**See also:** [README.md](README.md) · [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md) · [CACHE.md](CACHE.md) · [scenario_1.md](scenario_1.md)–[scenario_3.md](scenario_3.md)
+**See also:** [../README.md](../README.md) · [performance-analysis.md](performance-analysis.md) · [cache.md](cache.md) · [scenarios](../lab/scenarios/)
