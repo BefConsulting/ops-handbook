@@ -1,6 +1,6 @@
 # PostgreSQL Best-Practice Configuration
 
-A checklist of what to tune at the **Linux host** level and in the **PostgreSQL** server for a production-grade deployment. Defaults ship conservative — these are the knobs that matter most.
+A checklist of what to tune at the **Linux host** level and in the **PostgreSQL** server for a production-grade deployment. Defaults ship conservative — these are the knobs that matter most. Each entry says **what it does** and **where you set it**.
 
 **See also:** [wal-and-checkpoints.md](wal-and-checkpoints.md) (checkpoint sizing) · [deep-dive.md](deep-dive.md) §2 (memory/planner), §4 (security) · [performance-analysis.md](performance-analysis.md) · [../scripts/settings.sql](../scripts/settings.sql) (audit current values)
 
@@ -10,14 +10,16 @@ A checklist of what to tune at the **Linux host** level and in the **PostgreSQL*
 
 ## Part 1 — Linux host level
 
+**Where these live:** almost all are **kernel parameters (sysctl)**. View one with `sysctl vm.swappiness`, set it live with `sysctl -w vm.swappiness=1`, and make it **persistent** by adding it to `/etc/sysctl.conf` or a file in `/etc/sysctl.d/*.conf`, then applying with `sudo sysctl --system`. The THP and I/O-scheduler knobs live under `/sys/...` and are best persisted via a `tuned` profile, `systemd`, or a udev rule.
+
 ### Memory & overcommit
-| Setting | Recommended | Why |
-|---------|-------------|-----|
-| `vm.overcommit_memory` | `2` | Stops the OOM killer from killing the postmaster; allocations fail predictably instead |
-| `vm.overcommit_ratio` | `80`–`90` (with little/no swap) | Caps committable memory = swap + ratio% of RAM |
-| `vm.swappiness` | `1` (or `0`–`10`) | Keep Postgres pages in RAM; avoid swapping the cache |
-| Transparent Huge Pages (THP) | **disabled** (`never`) | THP defrag causes latency spikes/stalls under load |
-| Explicit Huge Pages (`vm.nr_hugepages`) | size to cover `shared_buffers` | Reduces page-table overhead; pair with `huge_pages=try/on` in PG |
+| Setting | Recommended | What it does & where |
+|---------|-------------|----------------------|
+| `vm.overcommit_memory` | `2` | **sysctl.** Controls how the kernel hands out memory. `0` (default) lets the kernel guess and can summon the **OOM killer** — which may kill the postmaster and take the whole instance down. `2` = "no overcommit": allocations beyond the limit fail cleanly, so a runaway query errors instead of the server being killed. |
+| `vm.overcommit_ratio` | `80`–`90` (little/no swap) | **sysctl.** Only used when `overcommit_memory=2`. Committable memory = `swap + ratio% of RAM`. Set high when you've sized memory deliberately and run minimal swap. |
+| `vm.swappiness` | `1` (range `0`–`10`) | **sysctl.** How eagerly the kernel swaps RAM to disk. Low keeps PostgreSQL's shared buffers and page cache in RAM; high would swap out hot cache and tank latency. |
+| Transparent Huge Pages (THP) | **disabled** (`never`) | **`/sys/kernel/mm/transparent_hugepage/{enabled,defrag}`.** THP's background defrag causes unpredictable latency stalls in databases. Disable it (PostgreSQL recommends against THP). |
+| Explicit Huge Pages | size to cover `shared_buffers` | **`vm.nr_hugepages` sysctl.** Pre-allocates large (2MB) memory pages so the CPU's page tables are smaller and faster to walk. Pair with `huge_pages=try`/`on` in PostgreSQL. |
 
 ```bash
 # Disable THP at runtime (persist via tuned/grub/systemd)
@@ -26,125 +28,127 @@ echo never > /sys/kernel/mm/transparent_hugepage/defrag
 ```
 
 ### Dirty page writeback (smooths I/O, avoids checkpoint stalls)
-| Setting | Recommended | Why |
-|---------|-------------|-----|
-| `vm.dirty_background_bytes` | e.g. `67108864` (64MB) | Start flushing early so dirty data doesn't pile up |
-| `vm.dirty_bytes` | e.g. `536870912` (512MB) | Cap dirty data before forced synchronous writeback |
+| Setting | Recommended | What it does & where |
+|---------|-------------|----------------------|
+| `vm.dirty_background_bytes` | e.g. `67108864` (64MB) | **sysctl.** Amount of modified ("dirty") page-cache data that triggers the kernel to **start** flushing to disk in the background. Lower = flush early and often, so writeback is gentle. |
+| `vm.dirty_bytes` | e.g. `536870912` (512MB) | **sysctl.** Hard ceiling of dirty data; once hit, processes are **forced to block** and write synchronously — a latency cliff. Keep it above the background threshold but bounded. |
 
-Prefer the `_bytes` variants over `_ratio` on large-RAM hosts (a ratio of RAM can be enormous).
+Prefer the `_bytes` variants over the `_ratio` ones on large-RAM hosts (a ratio of RAM can be tens of GB of dirty data, which leads to huge write storms at checkpoint time).
 
 ### Storage & filesystem
-- **Filesystem:** `ext4` or `xfs`. Avoid network filesystems (NFS) for the data directory.
-- **Mount with `noatime`** to skip access-time writes.
-- **Separate volumes** for data (`PGDATA`), WAL (`pg_wal`), and (optionally) temp — separates write patterns and I/O contention.
-- **I/O scheduler:** `none`/`noop` for NVMe, `mq-deadline` for SSD; avoid `cfq`.
-- Ensure **write barriers / reliable `fsync`** — disable volatile write caches without battery/flush, or you risk corruption on power loss.
-- **RAID:** RAID10 for write-heavy; battery-backed write cache on the controller.
+- **Filesystem:** `ext4` or `xfs` (both well-tested for PG). Avoid network filesystems (NFS) for `PGDATA`.
+- **Mount option `noatime`** (in `/etc/fstab`): stops the FS from writing an access timestamp on every read.
+- **Separate block devices/volumes** for data (`PGDATA`), WAL (`pg_wal`), and optionally temp — isolates sequential WAL writes from random data I/O.
+- **I/O scheduler** (`/sys/block/<dev>/queue/scheduler`): `none`/`noop` for NVMe, `mq-deadline` for SSD; avoid `cfq`.
+- Ensure **reliable `fsync`** — disable volatile disk write caches that aren't battery/capacitor-backed, or a power loss can corrupt the database.
+- **RAID10** for write-heavy workloads; use a controller with a battery-backed write cache.
 
 ### CPU, NUMA, scheduling
-- **CPU governor = `performance`** (avoid frequency scaling latency).
-- On NUMA boxes, interleave memory or pin to avoid cross-node penalties; test `numactl --interleave=all`.
+- **CPU governor = `performance`** (set via `cpupower` or `/sys/devices/system/cpu/.../scaling_governor`): avoids the latency of frequency ramp-up.
+- On NUMA servers, cross-node memory access is slower; test `numactl --interleave=all` for the postmaster to spread memory evenly.
 
 ### Limits, network, misc
-| Area | Recommended |
-|------|-------------|
-| File descriptors | High `LimitNOFILE` (e.g. `65535`) for the postgres service |
-| `net.core.somaxconn` | `1024`+ (connection backlog) |
-| TCP keepalives | Tune `net.ipv4.tcp_keepalive_time` for dead-peer detection |
-| Time sync | Run `chrony`/NTP — critical for replication/log correlation |
-| Security | Restrict `PGDATA` perms (`0700`, owned by `postgres`); firewall the port; SELinux/AppArmor enforcing |
+| Area | Recommended | What it does & where |
+|------|-------------|----------------------|
+| File descriptors | `LimitNOFILE=65535`+ | **systemd unit / `/etc/security/limits.conf`.** PG opens many files (relations, sockets); too low a limit causes "too many open files" errors. |
+| `net.core.somaxconn` | `1024`+ | **sysctl.** Max queued incoming connections; raise so connection bursts aren't dropped. |
+| TCP keepalives | tune `net.ipv4.tcp_keepalive_time` | **sysctl.** Detects dead client/replica peers so their connections get cleaned up. |
+| Time sync | run `chrony`/NTP | **service.** Accurate clocks are essential for replication ordering and correlating logs across hosts. |
+| Security | `PGDATA` mode `0700`, owned by `postgres` | **filesystem perms.** Plus firewall the port and run SELinux/AppArmor in enforcing mode. |
 
-> Note: modern PG (9.3+) uses `mmap` for shared memory, so legacy `kernel.shmmax`/`shmall` tuning is largely unnecessary unless you force `huge_pages`.
+> Note: modern PostgreSQL (9.3+) uses `mmap` for shared memory, so the legacy `kernel.shmmax`/`kernel.shmall` sysctl tuning is no longer needed — unless you force `huge_pages`.
 
 ---
 
-## Part 2 — PostgreSQL server (`postgresql.conf`)
+## Part 2 — PostgreSQL server
+
+**Where these live:** in `postgresql.conf`, or set them at runtime with `ALTER SYSTEM SET ... ;` (which writes to `postgresql.auto.conf`). After changing, either `SELECT pg_reload_conf();` (for "reloadable" params) or restart (for ones marked `postmaster`). Check any value and how to apply it with the query in the last section.
 
 ### Memory
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `shared_buffers` | ~25% of RAM | Don't exceed ~40%; the OS cache does the rest |
-| `effective_cache_size` | 50–75% of RAM | Planner hint only (not an allocation) — tells it how much is cacheable |
-| `work_mem` | 16–64MB (workload-dependent) | **Per sort/hash node, per connection** — multiply by concurrency before raising |
-| `maintenance_work_mem` | 512MB–2GB | Speeds VACUUM, index builds, restores |
-| `autovacuum_work_mem` | inherit or set explicitly | Caps memory per autovacuum worker |
-| `huge_pages` | `try` (or `on` once host huge pages configured) | Lower page-table overhead |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `shared_buffers` | ~25% of RAM | PostgreSQL's **own** cache of table/index pages. The single most important memory setting. Don't exceed ~40% — the OS page cache also caches data, and double-buffering wastes RAM. (Requires restart.) |
+| `effective_cache_size` | 50–75% of RAM | **Not an allocation** — it's a *hint* to the planner about how much data is likely cached (in `shared_buffers` + OS cache). Higher values make the planner favor **index scans** over sequential scans, because it assumes pages will be found in memory. |
+| `work_mem` | 16–64MB | Memory for **one** sort or hash operation. It's **per node, per connection** — a complex query with many sorts × many connections can multiply this fast, so size it against peak concurrency, not just available RAM. Too low → sorts spill to disk (`external merge`). |
+| `maintenance_work_mem` | 512MB–2GB | Memory for maintenance ops (VACUUM, CREATE INDEX, restores). Larger = faster index builds and vacuums. Only a few run at once, so it can be much bigger than `work_mem`. |
+| `autovacuum_work_mem` | inherit or set | Like `maintenance_work_mem` but caps memory **per autovacuum worker**, so many workers don't collectively exhaust RAM. |
+| `huge_pages` | `try` (or `on` once host configured) | Tells PG to back `shared_buffers` with the host's huge pages, reducing page-table overhead. `try` = use if available, else fall back. |
 
 ### WAL & checkpoints  ([details](wal-and-checkpoints.md))
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `wal_level` | `replica` (or `logical` if using logical repl/CDC) | |
-| `max_wal_size` | large enough that checkpoints are time-triggered | Watch `checkpoints_req` ≈ 0 |
-| `min_wal_size` | e.g. `1–2GB` | Keeps recycled segments to avoid churn |
-| `checkpoint_timeout` | `15min` (`30min` for write-heavy) | Spreads I/O; longer = fewer full-page writes |
-| `checkpoint_completion_target` | `0.9` | Spreads checkpoint writes across the interval |
-| `wal_compression` | `on` | Less WAL volume, small CPU cost |
-| `wal_buffers` | `16MB` (or `-1` auto) | |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `wal_level` | `replica` (or `logical` for logical repl/CDC) | How much info is written to WAL. `replica` supports streaming replicas + PITR; `logical` additionally enables logical decoding. |
+| `max_wal_size` | large enough that checkpoints are time-triggered | Soft cap on WAL between checkpoints. If WAL fills this before the timeout, a checkpoint is **forced** (`checkpoints_req` rises) — raise it until forced checkpoints ≈ 0. |
+| `min_wal_size` | `1`–`2GB` | Floor of WAL files PG keeps and recycles instead of deleting, avoiding churn during bursts. |
+| `checkpoint_timeout` | `15min` (`30min` write-heavy) | Max time between automatic checkpoints. Longer = fewer checkpoints and fewer full-page image writes, but longer crash recovery. |
+| `checkpoint_completion_target` | `0.9` | Spreads a checkpoint's writes across 90% of the interval instead of dumping them at once — smooths the I/O spike. |
+| `wal_compression` | `on` | Compresses full-page images in WAL — less WAL volume for a little CPU. |
+| `wal_buffers` | `16MB` (or `-1` = auto) | Shared memory buffering WAL before it's flushed to disk. |
 
 ### Durability (don't disable in production)
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `fsync` | `on` | **Never off in prod** — off risks corruption |
-| `full_page_writes` | `on` | Protects against torn pages |
-| `synchronous_commit` | `on` (relax to `off`/`local` only if you accept losing the last few txns) | Per-txn tunable for hot paths |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `fsync` | `on` | Forces WAL/data to physically reach disk. **Never turn off in production** — off means a crash can leave a corrupted, unrecoverable database. |
+| `full_page_writes` | `on` | Writes a full image of a page the first time it changes after a checkpoint, protecting against **torn pages** (partial writes on crash). |
+| `synchronous_commit` | `on` | Whether `COMMIT` waits for WAL to be durably flushed. `on` = no data loss on crash. Can be relaxed to `off`/`local` (or per-transaction) on hot paths if you accept losing the last fraction of a second of commits. |
 
 ### Autovacuum (keep it aggressive at scale)
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `autovacuum` | `on` | Never disable globally |
-| `autovacuum_max_workers` | `3`–`6` | More workers for many tables |
-| `autovacuum_vacuum_scale_factor` | `0.05` (lower for big tables) | Default `0.2` waits too long on large tables; override per-table |
-| `autovacuum_analyze_scale_factor` | `0.02`–`0.05` | Fresher planner stats |
-| `autovacuum_vacuum_cost_limit` | raise (e.g. `2000`) | Default throttling is too gentle for busy systems |
-| `autovacuum_naptime` | `15s`–`30s` | How often it checks |
-| Freeze (`autovacuum_freeze_max_age`, etc.) | tune for high-XID workloads | See [deep-dive.md](deep-dive.md) §1.3 to avoid wraparound |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `autovacuum` | `on` | Background process that reclaims dead tuples (bloat) and refreshes planner stats. Never disable globally. |
+| `autovacuum_max_workers` | `3`–`6` | How many tables can be vacuumed concurrently. Raise it when you have many tables. |
+| `autovacuum_vacuum_scale_factor` | `0.05` (lower for big tables) | Vacuum triggers at `threshold + scale_factor × rows`. Default `0.2` (20%) means a 1B-row table waits for 200M dead rows — far too long. Override per-table for large tables. |
+| `autovacuum_analyze_scale_factor` | `0.02`–`0.05` | Same idea for ANALYZE — keeps planner statistics fresh so row estimates stay accurate. |
+| `autovacuum_vacuum_cost_limit` | raise (e.g. `2000`) | Autovacuum throttles itself with a cost budget; the gentle default lets it fall behind on busy systems. Raise to let it keep up. |
+| `autovacuum_naptime` | `15s`–`30s` | How often the launcher checks whether tables need work. |
+| Freeze params (`autovacuum_freeze_max_age`, …) | tune for high-XID workloads | Govern transaction-ID **freezing** to prevent wraparound. See [deep-dive.md](deep-dive.md) §1.3. |
 
 ### Planner
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `random_page_cost` | `1.1` on SSD/NVMe | Default `4.0` assumes spinning disk and discourages index use |
-| `effective_io_concurrency` | `200` for SSD/NVMe | Enables prefetch for bitmap scans |
-| `default_statistics_target` | `100` (raise to `500`+ for skewed columns) | More histogram detail = better estimates |
-| `jit` | `off` for OLTP, `on` for analytics | JIT helps long analytical queries, hurts short ones |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `random_page_cost` | `1.1` on SSD/NVMe | The planner's estimated cost of a **random** page read relative to a sequential one. The default `4.0` assumes spinning disks and discourages index use; on SSD random reads are nearly as cheap as sequential, so lower it to favor index scans. |
+| `effective_io_concurrency` | `200` for SSD/NVMe | How many concurrent I/O requests the storage can handle; enables prefetching for bitmap heap scans. |
+| `default_statistics_target` | `100` (raise to `500`+ for skewed columns) | How many histogram buckets / distinct values ANALYZE collects per column. More detail = better selectivity estimates, at the cost of slightly slower ANALYZE and bigger stats. |
+| `jit` | `off` for OLTP, `on` for analytics | Just-in-time compilation of expressions. Helps long analytical queries; its compile overhead hurts short OLTP queries. |
 
 ### Connections (cap them; pool instead)
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `max_connections` | modest (e.g. `100`–`200`) + **PgBouncer** | Each backend costs RAM; pooling beats raising this |
-| `idle_in_transaction_session_timeout` | e.g. `5min` | Kills sessions that pin xmin and hold locks |
-| `statement_timeout` | per-app (e.g. `30s`–`60s`) | Stops runaway queries |
-| `lock_timeout` | e.g. `5s` | Fail fast instead of blocking on locks |
-| `tcp_keepalives_idle/interval` | set | Detect dead clients |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `max_connections` | `100`–`200` + **PgBouncer** | Hard cap on backends. Each connection is a process with RAM overhead; raising this is worse than putting a connection pooler (PgBouncer) in front. (Requires restart.) |
+| `idle_in_transaction_session_timeout` | `5min` | Auto-terminates sessions stuck "idle in transaction" — those pin the xmin horizon (blocking vacuum) and may hold locks. |
+| `statement_timeout` | `30s`–`60s` (per app) | Aborts any single query running longer than this — a safety net against runaway queries. |
+| `lock_timeout` | `5s` | Gives up waiting for a lock after this long, so a blocked statement fails fast instead of stalling indefinitely. |
+| `tcp_keepalives_idle` / `_interval` | set | Lets PG detect and clean up dead client connections. |
 
 ### Logging & observability (turn these on early)
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `logging_collector` | `on` | |
-| `log_min_duration_statement` | `1000` (1s) | Capture slow queries |
-| `log_checkpoints` | `on` | See checkpoint frequency/cost |
-| `log_lock_waits` | `on` | Surfaces lock contention |
-| `log_temp_files` | `0` | Flags `work_mem` spills to disk |
-| `log_autovacuum_min_duration` | `0` or `250ms` | Watch autovacuum behavior |
-| `log_line_prefix` | `'%m [%p] %q%u@%d '` | Timestamps, pid, user, db |
-| `track_io_timing` | `on` | Real I/O timing in `EXPLAIN`/stats |
-| `shared_preload_libraries` | `pg_stat_statements` (+ `auto_explain`) | Top-query visibility; needs a restart |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `logging_collector` | `on` | Captures stderr into managed log files. |
+| `log_min_duration_statement` | `1000` (1s) | Logs any statement slower than this — your slow-query feed. |
+| `log_checkpoints` | `on` | Logs each checkpoint's timing and buffers written — shows if checkpoints are too frequent. |
+| `log_lock_waits` | `on` | Logs when a session waits past `deadlock_timeout` for a lock — surfaces contention. |
+| `log_temp_files` | `0` | Logs every temp file written (i.e. `work_mem` spills to disk). |
+| `log_autovacuum_min_duration` | `0` or `250ms` | Logs autovacuum runs so you can see if it keeps up. |
+| `log_line_prefix` | `'%m [%p] %q%u@%d '` | Prefix on each log line: timestamp, pid, user, database — essential context. |
+| `track_io_timing` | `on` | Records real time spent on I/O, shown in `EXPLAIN (ANALYZE, BUFFERS)` and `pg_stat_statements`. |
+| `shared_preload_libraries` | `pg_stat_statements` (+ `auto_explain`) | Loads extensions at startup. `pg_stat_statements` aggregates query stats. (Requires restart.) |
 
 ### Replication (if applicable) ([details](ha-and-dr.md))
-| Parameter | Recommended | Notes |
-|-----------|-------------|-------|
-| `max_wal_senders` | `10` | Enough for replicas + base backups |
-| `max_replication_slots` | `10` | One per standby/subscriber |
-| `hot_standby` | `on` | Read queries on standbys |
-| `max_slot_wal_keep_size` | bound it | Prevents an inactive slot from filling `pg_wal` |
-| `archive_mode` + `archive_command` | `on` + pgBackRest/WAL-G | Required for PITR |
+| Parameter | Recommended | What it does |
+|-----------|-------------|--------------|
+| `max_wal_senders` | `10` | Max concurrent WAL-sender processes (one per streaming replica or base backup). |
+| `max_replication_slots` | `10` | Max replication slots (one per standby/subscriber) that track how far each consumer has read. |
+| `hot_standby` | `on` | Allows read-only queries on a standby while it replays WAL. |
+| `max_slot_wal_keep_size` | bound it | Caps how much WAL an inactive slot can pin — prevents a dead replica's slot from filling `pg_wal` and stopping the primary. |
+| `archive_mode` + `archive_command` | `on` + pgBackRest/WAL-G | Ships completed WAL segments to archive storage — required for Point-In-Time Recovery. |
 
 ### Security essentials ([details](deep-dive.md) §4)
-| Setting | Recommended |
-|---------|-------------|
-| `listen_addresses` | only the interfaces you need (not `*` blindly) |
-| `password_encryption` | `scram-sha-256` |
-| `pg_hba.conf` | `scram-sha-256` + least-privilege host rules; no `trust` over network |
-| `ssl` | `on` with valid certs (encrypt in transit) |
+| Setting | Recommended | What it does |
+|---------|-------------|--------------|
+| `listen_addresses` | only needed interfaces | Which network interfaces PG binds to; don't expose `*` unless intended. |
+| `password_encryption` | `scram-sha-256` | Hashing scheme for stored passwords; SCRAM is the modern, secure choice over `md5`. |
+| `pg_hba.conf` | `scram-sha-256` + least-privilege host rules | The client authentication rulebook (who, from where, how). Never use `trust` over a network. |
+| `ssl` | `on` with valid certs | Encrypts client↔server traffic in transit. |
 
 ---
 
@@ -161,12 +165,14 @@ FROM pg_settings
 WHERE name IN ('shared_buffers','random_page_cost','max_connections');
 ```
 
-- `context = postmaster` → **requires a full restart** (e.g. `shared_buffers`, `max_connections`, `shared_preload_libraries`).
-- `context = sighup` → `pg_reload_conf()` / `SELECT pg_reload_conf();` is enough.
-- `context = user/superuser` → can be set per-session or per-role/db.
-- Audit everything non-default with the **"Settings changed from default"** query in [../scripts/settings.sql](../scripts/settings.sql).
+The `context` column tells you **how a change takes effect**:
+- `postmaster` → **requires a full restart** (e.g. `shared_buffers`, `max_connections`, `shared_preload_libraries`).
+- `sighup` → a reload is enough (`SELECT pg_reload_conf();` or `pg_ctl reload`).
+- `superuser` / `user` → can be set per-session (`SET ...`) or per-role/per-database (`ALTER ROLE/DATABASE ... SET ...`).
+
+The `source` column tells you **where the current value came from** (`default`, `configuration file`, `override`, etc.). Audit everything non-default with the **"Settings changed from default"** query in [../scripts/settings.sql](../scripts/settings.sql).
 
 ## Sizing & validation tools
-- **PGTune** / **pgconfig** — sane starting values from RAM/CPU/workload type.
-- **pgbench** — load-test before/after a change.
-- **`pg_stat_statements`** + [scripts/](../scripts/) — measure the real effect, don't guess.
+- **PGTune** / **pgconfig** — generate sane starting values from RAM, CPU count, and workload type.
+- **pgbench** — load-test before/after a change to confirm it actually helped.
+- **`pg_stat_statements`** + [scripts/](../scripts/) — measure the real effect; never tune by guessing.
