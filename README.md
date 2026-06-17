@@ -6,7 +6,7 @@ Telecom SaaS dummy data for learning `EXPLAIN (ANALYZE, BUFFERS)`.
 - [POSTGRESQL_DEEP_DIVE.md](POSTGRESQL_DEEP_DIVE.md) — the big one: internals (MVCC/WAL/vacuum/bloat/planner), performance tuning, HA & scaling, security
 - [PERFORMANCE_ANALYSIS.md](PERFORMANCE_ANALYSIS.md) — where to start, what to check, the full investigation funnel
 - [WAL_AND_CHECKPOINTS.md](WAL_AND_CHECKPOINTS.md) — WAL vs dirty buffers, checkpoints, crash recovery
-- [REPLICATION.md](REPLICATION.md) — physical/logical replication, lag, troubleshooting, HA best practices
+- [HA_AND_DR.md](HA_AND_DR.md) — replication, failover automation (Patroni/DCS), disaster recovery & PITR
 - [CACHE.md](CACHE.md) — cold vs warm cache explained
 - [scripts/](scripts/) — ready-to-run monitoring `.sql` files (`\i scripts/activity.sql`, etc.)
 

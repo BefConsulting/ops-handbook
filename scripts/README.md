@@ -40,4 +40,4 @@ Run the whole suite at once (from the DBA repo root):
 - `replication.sql` mixes primary-side and standby-side queries — irrelevant ones just return no rows.
 - Version note: PG17+ relocated some counters (`pg_stat_checkpointer`, `pg_stat_io`); these scripts target **PG16**.
 
-**See also:** [../PERFORMANCE_ANALYSIS.md](../PERFORMANCE_ANALYSIS.md) · [../WAL_AND_CHECKPOINTS.md](../WAL_AND_CHECKPOINTS.md) · [../REPLICATION.md](../REPLICATION.md)
+**See also:** [../PERFORMANCE_ANALYSIS.md](../PERFORMANCE_ANALYSIS.md) · [../WAL_AND_CHECKPOINTS.md](../WAL_AND_CHECKPOINTS.md) · [../HA_AND_DR.md](../HA_AND_DR.md)
