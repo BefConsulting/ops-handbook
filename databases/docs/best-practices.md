@@ -13,9 +13,20 @@ A checklist of what to tune at the **Linux host** level and in the **PostgreSQL*
 **Where these live:** almost all are **kernel parameters (sysctl)**. View one with `sysctl vm.swappiness`, set it live with `sysctl -w vm.swappiness=1`, and make it **persistent** by adding it to `/etc/sysctl.conf` or a file in `/etc/sysctl.d/*.conf`, then applying with `sudo sysctl --system`. The THP and I/O-scheduler knobs live under `/sys/...` and are best persisted via a `tuned` profile, `systemd`, or a udev rule.
 
 ### Memory & overcommit
+
+**What "memory overcommit" means:** Linux hands out **more memory than physically exists**, betting that processes won't actually use everything they ask for. When a program allocates (e.g. `malloc`), it gets *virtual* address space — a promise — and the kernel only maps real RAM when the program **touches** (writes to) a page. Because programs routinely reserve far more than they use (sparse allocations, `fork()` with copy-on-write, large arenas left mostly untouched), the kernel can safely "oversell" memory — much like an airline overbooking seats expecting no-shows.
+
+**The risk — the OOM killer:** the bet fails when processes really do touch more memory than physically exists. The kernel can't conjure RAM, so it invokes the **OOM (Out-Of-Memory) killer**, which picks a process and kills it to reclaim memory. For PostgreSQL this is dangerous: the OOM killer tends to target a high-memory process and may kill the **postmaster** (the parent process) — which drops every connection and takes the **entire instance** down, looking like a crash.
+
+**Why mode `2` for Postgres:** setting `vm.overcommit_memory=2` ("never overcommit") caps total allocations at `swap + (overcommit_ratio% × RAM)`. Past that line, a new allocation **fails cleanly** — the offending backend gets an "out of memory" error and that one query aborts, but **the postmaster and the rest of the instance survive**. You trade one failed query for protecting the whole database — converting a catastrophic, random kill into a contained, predictable error. This is exactly what you want on a 24×7 critical database.
+
+> **Caveat:** mode `2` only helps if your *normal* working set fits under the cap. Size `shared_buffers`, `work_mem × peak connections`, and `maintenance_work_mem` deliberately, or you'll hit allocation failures during ordinary operation. The cap protects you from runaways; it doesn't excuse undersizing RAM.
+
+The `_ratio` defaults to `50`; raise it toward `80`–`90` only when you've sized memory carefully and run minimal swap (committable memory = `swap + ratio% of RAM`).
+
 | Setting | Recommended | What it does & where |
 |---------|-------------|----------------------|
-| `vm.overcommit_memory` | `2` | **sysctl.** Controls how the kernel hands out memory. `0` (default) lets the kernel guess and can summon the **OOM killer** — which may kill the postmaster and take the whole instance down. `2` = "no overcommit": allocations beyond the limit fail cleanly, so a runaway query errors instead of the server being killed. |
+| `vm.overcommit_memory` | `2` | **sysctl.** Controls how the kernel hands out memory. `0` (default) = **heuristic**: the kernel guesses if an allocation is reasonable and can still summon the **OOM killer** — which may kill the postmaster and take the whole instance down. `1` = **always overcommit** (never refuses; dangerous generally). `2` = **never overcommit**: allocations beyond the committable limit fail cleanly, so a runaway query errors instead of the server being killed. |
 | `vm.overcommit_ratio` | `80`–`90` (little/no swap) | **sysctl.** Only used when `overcommit_memory=2`. Committable memory = `swap + ratio% of RAM`. Set high when you've sized memory deliberately and run minimal swap. |
 | `vm.swappiness` | `1` (range `0`–`10`) | **sysctl.** How eagerly the kernel swaps RAM to disk. Low keeps PostgreSQL's shared buffers and page cache in RAM; high would swap out hot cache and tank latency. |
 | Transparent Huge Pages (THP) | **disabled** (`never`) | **`/sys/kernel/mm/transparent_hugepage/{enabled,defrag}`.** THP's background defrag causes unpredictable latency stalls in databases. Disable it (PostgreSQL recommends against THP). |
