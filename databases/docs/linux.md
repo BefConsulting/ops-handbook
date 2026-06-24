@@ -116,6 +116,31 @@ free -h            # look at the Swap row
 
 ---
 
+### Background: pages, the page table, and the TLB
+
+Memory is managed in fixed-size chunks called **pages** — **4KB** by default on x86-64 Linux. Every process uses *virtual* addresses, and the CPU translates each to a *physical* address using the **page table**; recent translations are cached in a small, fast hardware cache, the **TLB** (Translation Lookaside Buffer).
+
+With 4KB pages, a large memory region needs an enormous number of page-table entries:
+
+```
+64GB of shared_buffers ÷ 4KB  = ~16,000,000 pages
+64GB of shared_buffers ÷ 2MB  =     ~32,000 pages   (huge pages → ~500× fewer)
+```
+
+The TLB only holds a few thousand entries, so a database touching lots of memory suffers frequent **TLB misses**, each forcing a slow page-table walk. **Huge pages** (typically **2MB**, sometimes 1GB) cover far more memory per entry, so: fewer TLB misses, smaller page tables, and faster, more predictable address translation — a real win for a database with large `shared_buffers`.
+
+**The critical distinction:** there are two ways to get huge pages, and Postgres wants opposite things from them —
+
+| | **Explicit huge pages** | **Transparent Huge Pages (THP)** |
+|---|--------------------------|----------------------------------|
+| How | You pre-allocate (`vm.nr_hugepages`); apps opt in | Kernel forms/uses them automatically for any process |
+| Postgres stance | **Use them** (back `shared_buffers`) | **Disable** (`never`) |
+| Why | Reserved up front, predictable, no runtime cost | Background daemon (`khugepaged`) defragments memory to form them → **latency stalls** |
+
+So the guidance is *not* "huge pages are bad" — it's **explicit huge pages = good, THP = disable**.
+
+---
+
 ### Transparent Huge Pages (THP)
 
 **What it is:** a kernel feature that automatically backs memory with 2MB "huge" pages and **defragments** memory in the background to form them. For databases, that background defrag (`khugepaged`) causes **unpredictable latency stalls**. PostgreSQL explicitly recommends disabling THP. (This is distinct from *explicit* huge pages below.)
@@ -134,7 +159,7 @@ Persist via a `tuned` profile (`[vm] transparent_hugepages=never`), a `systemd` 
 
 ### Explicit Huge Pages
 
-**What it is:** *manually pre-allocated* 2MB pages (not the automatic THP). Backing `shared_buffers` with huge pages shrinks the CPU's page tables, so address translation is faster and uses less memory — a real win for large `shared_buffers`. Pair with `huge_pages = try` (or `on`) in `postgresql.conf`.
+**What it is:** *manually pre-allocated* 2MB pages (not the automatic THP). Postgres allocates `shared_buffers` as one big shared-memory region that every backend maps; backing it with huge pages shrinks the page tables and cuts TLB misses (see background above), so address translation is faster and uses less memory — a real win for large `shared_buffers`. Pair with `huge_pages = try` (or `on`) in `postgresql.conf`.
 
 **Recommended:** size `vm.nr_hugepages` to cover `shared_buffers` (plus a little headroom)
 
@@ -145,7 +170,12 @@ Persist via a `tuned` profile (`[vm] transparent_hugepages=never`), a `systemd` 
 sudo sysctl -w vm.nr_hugepages=NNNN
 echo 'vm.nr_hugepages = NNNN' | sudo tee -a /etc/sysctl.d/30-postgresql.conf
 ```
-Then set `huge_pages = try` in `postgresql.conf` and restart Postgres. (`try` falls back gracefully if not enough huge pages are available; `on` refuses to start without them.)
+Then in `postgresql.conf`:
+```ini
+huge_pages = try    # use huge pages if enough are available, else fall back to 4KB
+# huge_pages = on   # strict: refuse to start unless huge pages are available
+```
+Restart Postgres. `try` is the safe default — it falls back to normal pages instead of failing to start if the host doesn't have enough huge pages reserved; `on` refuses to start without them.
 
 ---
 
