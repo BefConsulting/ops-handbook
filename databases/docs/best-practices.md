@@ -28,12 +28,35 @@ echo never > /sys/kernel/mm/transparent_hugepage/defrag
 ```
 
 ### Dirty page writeback (smooths I/O, avoids checkpoint stalls)
+
+**The concept:** when Postgres (or anything) writes, the data first lands in the kernel's **page cache** as a "dirty" page — modified in RAM but not yet on disk. The kernel decides *when* to flush those dirty pages down to storage. These four sysctls set the thresholds. There are **two pairs that control the same two thresholds** — one expressed in **bytes**, one as a **percentage of available memory**. You pick *one* unit per threshold; setting the `_bytes` form to non-zero disables its `_ratio` counterpart, and vice-versa (whichever you set last wins, and reading the other back shows `0`).
+
+The two thresholds, low to high:
+
+1. **Background threshold** — when dirty data crosses this, the kernel's flusher threads **start writing in the background**. Applications keep running normally. → `vm.dirty_background_bytes` *or* `vm.dirty_background_ratio`.
+2. **Hard (foreground) threshold** — when dirty data crosses this, the kernel **forces the writing process itself to block** and flush synchronously until it's back under the line. This is a latency cliff you want to avoid hitting. → `vm.dirty_bytes` *or* `vm.dirty_ratio`.
+
 | Setting | Recommended | What it does & where |
 |---------|-------------|----------------------|
-| `vm.dirty_background_bytes` | e.g. `67108864` (64MB) | **sysctl.** Amount of modified ("dirty") page-cache data that triggers the kernel to **start** flushing to disk in the background. Lower = flush early and often, so writeback is gentle. |
-| `vm.dirty_bytes` | e.g. `536870912` (512MB) | **sysctl.** Hard ceiling of dirty data; once hit, processes are **forced to block** and write synchronously — a latency cliff. Keep it above the background threshold but bounded. |
+| `vm.dirty_background_ratio` | `5` (default `10`) | **sysctl.** Background threshold as a **percentage of available memory**. At this much dirty data, flusher threads start writing in the background (non-blocking). Default `10%` of RAM can be a lot of unflushed data on a big-memory host. |
+| `vm.dirty_ratio` | `10` (default `20`) | **sysctl.** Hard threshold as a **percentage of available memory**. Once dirty data hits this, writers are **forced to block** and flush synchronously — a stall. Must be **higher** than `dirty_background_ratio`. |
+| `vm.dirty_background_bytes` | e.g. `67108864` (64MB) | **sysctl.** Same background threshold, but as an **absolute byte count** instead of a percentage. Lower = flush early and often, so writeback is gentle. Setting this zeroes `dirty_background_ratio`. |
+| `vm.dirty_bytes` | e.g. `536870912` (512MB) | **sysctl.** Same hard ceiling, as an **absolute byte count**. Once hit, processes block and write synchronously. Keep it above the background threshold but bounded. Setting this zeroes `dirty_ratio`. |
 
-Prefer the `_bytes` variants over the `_ratio` ones on large-RAM hosts (a ratio of RAM can be tens of GB of dirty data, which leads to huge write storms at checkpoint time).
+**Ratio vs bytes — which to use:**
+- The **`_ratio`** variants are a percentage of memory, so the *actual* dirty-data limit scales (often surprisingly large) with RAM. On a 256GB host the default `dirty_ratio = 20` permits ~51GB of dirty pages to accumulate before a forced flush — which then dumps to disk all at once, colliding with Postgres checkpoints to produce an **I/O write storm** and latency spikes.
+- The **`_bytes`** variants pin the threshold to a fixed, predictable amount regardless of RAM, so on **large-RAM hosts prefer `_bytes`** to keep writeback small and frequent. On smaller/standardized hosts the `_ratio` form is simpler and fine.
+- Whichever pair you choose, keep the **background threshold well below the hard threshold** (e.g. ~1:2) so the kernel starts flushing gently long before any process is forced to block. The goal is steady trickle-flush, never a sudden synchronous dump.
+
+```bash
+# View current values
+sysctl vm.dirty_background_ratio vm.dirty_ratio vm.dirty_background_bytes vm.dirty_bytes
+
+# Example: large-RAM host — switch to byte-based thresholds (persist in /etc/sysctl.d/)
+sysctl -w vm.dirty_background_bytes=67108864    # 64MB  → starts background flush
+sysctl -w vm.dirty_bytes=536870912              # 512MB → forced synchronous flush
+# (these two automatically set vm.dirty_background_ratio and vm.dirty_ratio to 0)
+```
 
 ### Storage & filesystem
 - **Filesystem:** `ext4` or `xfs` (both well-tested for PG). Avoid network filesystems (NFS) for `PGDATA`.
