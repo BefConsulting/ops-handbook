@@ -23,6 +23,8 @@ databases/
 | [docs/best-practices.md](docs/best-practices.md) | Production config checklist — PostgreSQL server tuning (links to linux.md for the host) |
 | [docs/monitoring.md](docs/monitoring.md) | SLIs / SLOs / error budgets for Postgres — example metrics, alert rules, and dashboards |
 | [docs/pgbouncer.md](docs/pgbouncer.md) | Hands-on: set up PgBouncer connection pooling locally on macOS |
+| [docs/pgbackrest.md](docs/pgbackrest.md) | Hands-on: set up pgBackRest backups + WAL archiving locally on macOS |
+| [docs/recovery.md](docs/recovery.md) | Restore from backup + Point-In-Time Recovery (PITR) with pgBackRest |
 | [docs/wal-and-checkpoints.md](docs/wal-and-checkpoints.md) | WAL vs dirty buffers, checkpoint tuning, crash recovery |
 | [docs/cache.md](docs/cache.md) | Cold vs warm cache, and how it shows up in `EXPLAIN` buffers |
 | [docs/ha-and-dr.md](docs/ha-and-dr.md) | Replication, failover automation (Patroni/DCS), disaster recovery & PITR |
@@ -62,4 +64,5 @@ See [scripts/README.md](scripts/README.md) for the full list.
 4. [docs/wal-and-checkpoints.md](docs/wal-and-checkpoints.md) + [docs/cache.md](docs/cache.md) — write path & memory
 5. [docs/best-practices.md](docs/best-practices.md) — production config checklist (host + server)
 6. [docs/ha-and-dr.md](docs/ha-and-dr.md) → [docs/patroni.md](docs/patroni.md) — availability & recovery
-7. [docs/pgbouncer.md](docs/pgbouncer.md) — connection pooling in front of the database
+7. [docs/pgbackrest.md](docs/pgbackrest.md) → [docs/recovery.md](docs/recovery.md) — backups, WAL archiving, and PITR
+8. [docs/pgbouncer.md](docs/pgbouncer.md) — connection pooling in front of the database
