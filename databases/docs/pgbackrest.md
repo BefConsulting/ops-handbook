@@ -77,31 +77,46 @@ pg1-path=/opt/homebrew/var/postgresql@16
 - **`repo1-retention-full=2`** keeps the last 2 full backups; older ones (and their WAL) expire automatically.
 - **`start-fast=y`** triggers an immediate checkpoint so the backup starts without waiting.
 
-Make pgBackRest find this config without `/etc`:
+**Make pgBackRest find this config.** Since it's not at the default `/etc/pgbackrest/pgbackrest.conf`, you must point pgBackRest at it on **every** command. The most reliable way is the explicit `--config` flag (used throughout this guide):
 
 ```bash
-export PGBACKREST_CONFIG=/opt/homebrew/etc/pgbackrest.conf
-# (or append --config=/opt/homebrew/etc/pgbackrest.conf to each command)
+pgbackrest --config=/opt/homebrew/etc/pgbackrest.conf --stanza=demo <command>
 ```
+
+To save typing, you *can* export an env var instead — **but it only applies in the shell where you ran the `export`** (a new terminal won't have it, which causes `ERROR: [037]: ... requires option: pg1-path`):
+
+```bash
+export PGBACKREST_CONFIG=/opt/homebrew/etc/pgbackrest.conf   # this shell only
+```
+
+> If you ever see **`ERROR: [037]: stanza-create command requires option: pg1-path`**, pgBackRest didn't read your config — it's looking in `/etc` and finding nothing. Add `--config=/opt/homebrew/etc/pgbackrest.conf` to the command (or re-`export` it in the current shell).
 
 ## 4. Point PostgreSQL at pgBackRest (WAL archiving)
 
-Tell Postgres to archive WAL through pgBackRest. Edit `postgresql.conf` (or use `ALTER SYSTEM`):
+Tell Postgres to archive WAL through pgBackRest. First find the **absolute path** to the binary — the `archive_command` is run by the PostgreSQL server, which has a minimal `PATH` that does *not* include `/opt/homebrew/bin`:
+
+```bash
+which pgbackrest      # e.g. /opt/homebrew/bin/pgbackrest
+```
+
+Then edit `postgresql.conf` (or use `ALTER SYSTEM`), using that absolute path:
 
 ```sql
 ALTER SYSTEM SET wal_level = 'replica';
 ALTER SYSTEM SET archive_mode = 'on';
-ALTER SYSTEM SET archive_command = 'pgbackrest --stanza=demo --config=/opt/homebrew/etc/pgbackrest.conf archive-push %p';
+ALTER SYSTEM SET archive_command = '/opt/homebrew/bin/pgbackrest --stanza=demo --config=/opt/homebrew/etc/pgbackrest.conf archive-push %p';
 ALTER SYSTEM SET max_wal_senders = 3;
 ```
 
-`archive_mode` and `wal_level` require a **restart** (not just reload):
+`archive_mode` and `wal_level` require a **restart** (not just reload); `archive_command` only needs a reload:
 
 ```bash
 brew services restart postgresql@16
 # or: pg_ctl -D /opt/homebrew/var/postgresql@16 restart
 ```
 
+> **Why the absolute path?** The server runs `archive_command` via `sh -c` with a restricted environment. A bare `pgbackrest` fails with `sh: pgbackrest: command not found` and `archive command failed with exit code 127`, even though it works in your shell. Always use the full path here (same goes for `restore_command`).
+>
 > `%p` is the path of the WAL segment Postgres hands to the command. `archive-push` copies it into the repo. If the command fails, Postgres retains the WAL and retries — so a broken `archive_command` makes `pg_wal` grow (see [wal-and-checkpoints.md](wal-and-checkpoints.md)).
 
 ## 5. Create the stanza
@@ -109,7 +124,7 @@ brew services restart postgresql@16
 This initializes the repo for your cluster:
 
 ```bash
-pgbackrest --stanza=demo stanza-create
+pgbackrest --config=/opt/homebrew/etc/pgbackrest.conf --stanza=demo stanza-create
 ```
 
 ## 6. Verify the configuration
@@ -117,7 +132,7 @@ pgbackrest --stanza=demo stanza-create
 `check` confirms Postgres and pgBackRest agree and that WAL archiving actually works (it forces a segment switch and checks it lands in the repo):
 
 ```bash
-pgbackrest --stanza=demo check
+pgbackrest --config=/opt/homebrew/etc/pgbackrest.conf --stanza=demo check
 # ... INFO: check command end: completed successfully
 ```
 
@@ -126,20 +141,21 @@ If this passes, archiving is wired correctly.
 ## 7. Take a backup
 
 ```bash
+# (commands shown with --config; export PGBACKREST_CONFIG to omit it)
 # First backup is always promoted to a full backup:
-pgbackrest --stanza=demo --type=full backup
+pgbackrest --config=/opt/homebrew/etc/pgbackrest.conf --stanza=demo --type=full backup
 
 # Later backups can be incremental (only changed files since the last backup):
-pgbackrest --stanza=demo --type=incr backup
+pgbackrest --config=/opt/homebrew/etc/pgbackrest.conf --stanza=demo --type=incr backup
 
 # Differential (changes since the last FULL):
-pgbackrest --stanza=demo --type=diff backup
+pgbackrest --config=/opt/homebrew/etc/pgbackrest.conf --stanza=demo --type=diff backup
 ```
 
 ## 8. Inspect backups
 
 ```bash
-pgbackrest --stanza=demo info
+pgbackrest --config=/opt/homebrew/etc/pgbackrest.conf --stanza=demo info
 ```
 
 ```
@@ -174,7 +190,8 @@ In production this is driven by your scheduler/IaC, with the repo on offsite obj
 
 | Symptom | Cause / fix |
 |---------|-------------|
-| `check` fails: "WAL segment ... was not archived" | `archive_command` wrong or Postgres not restarted after setting `archive_mode`. Verify the exact command and `SHOW archive_mode;`. |
+| `check` fails: "WAL segment ... was not archived" | `archive_command` wrong or Postgres not restarted after setting `archive_mode`. Verify the exact command and `SHOW archive_mode;`. Check `pg_stat_archiver` and `log-path/demo-archive-push.log`. |
+| `sh: pgbackrest: command not found` / "exit code 127" in PG log | `archive_command` uses a bare `pgbackrest`; the server's restricted `PATH` can't find it. Use the **absolute path** (`/opt/homebrew/bin/pgbackrest`), then `SELECT pg_reload_conf();`. |
 | `unable to open ... permission denied` | pgBackRest not running as the `PGDATA` owner, or repo dir not owned by your user. |
 | `stanza-create` says "primary has been initialized" mismatch | `pg1-path` doesn't match the running cluster's `data_directory`. |
 | `pg_wal` filling up | `archive_command` failing — Postgres keeps WAL until it succeeds. Check `pgbackrest` logs in `log-path`. |
