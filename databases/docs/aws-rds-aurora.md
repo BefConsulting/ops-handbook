@@ -56,7 +56,38 @@ RDS runs the **real community PostgreSQL** binary. Aurora is a **PostgreSQL-comp
 - **Backtrack** — rewind the cluster in-place to a past time (no restore) for quick "oops" recovery.
 - **Fast clones** — copy-on-write clone of a large DB in minutes for testing.
 - **Aurora Serverless v2** — auto-scales compute (ACUs) up/down with load; good for spiky/variable workloads.
-- **Global Database** — cross-region replication with ~1s lag for DR / low-latency global reads.
+- **Global Database** — cross-region replication with typically <1s lag for DR / low-latency global reads (see below).
+
+---
+
+## Aurora Global Database (multi-region)
+
+An **Aurora Global Database** is a single logical database spanning **multiple AWS regions**: one **primary region** that handles all writes, plus up to **five secondary regions** that are read-only and kept in sync.
+
+**How it works (why it's fast):** replication happens at the **storage layer**, not by shipping/replaying WAL over a normal connection. The primary's storage service streams changes directly to each secondary region's storage, so:
+- **Lag is typically under 1 second** (often ~tens of ms) even cross-continent.
+- It uses **dedicated infrastructure**, so replication doesn't steal CPU/IO from the primary's database engine.
+- Each secondary region can have up to **16 read replicas** for local low-latency reads.
+
+**Why use it:**
+- **Disaster recovery** — survive a full **region** outage (RDS Multi-AZ only survives an *AZ* outage). Low **RPO** (≈1s of data) and low **RTO** (promote a secondary in typically **<1 minute**).
+- **Low-latency global reads** — serve users near a secondary region from local replicas.
+- **Cross-region scaling** — offload read traffic to other regions.
+
+**Failover options:**
+- **Managed planned failover** — for drills/maintenance; keeps the topology intact and loses no data (it syncs first).
+- **Unplanned (detach & promote)** — during a real regional outage you promote a secondary to be a standalone primary.
+
+### Headless secondary regions
+
+A **headless secondary** is a secondary region that has **storage but no DB instances (no compute)** — just the replicated Aurora storage volume kept in sync from the primary.
+
+- **Why:** it dramatically **cuts cost** for a DR standby. You pay for storage + replication (and replicated I/O) but **not for idle compute** sitting there waiting for a disaster.
+- **How it behaves:** the region stays continuously up to date at the storage layer. Because there are no readers, you **can't serve reads** from it while it's headless.
+- **At failover:** you **add compute instances** to that region (or promote it), then it starts serving traffic. There's a short delay to spin up instances versus a "hot" secondary that already has replicas running — a classic **cost vs. RTO trade-off**.
+- **Setup:** create the Global Database secondary region and simply don't provision any DB instances in it (0 instances) — the storage-only volume is the headless secondary.
+
+> Trade-off summary: **hot secondary** (has replicas) = faster failover + serves reads, higher cost. **Headless secondary** (no compute) = cheapest DR, but you add instances at failover so RTO is a bit higher.
 
 ---
 
@@ -109,3 +140,5 @@ RDS runs the **real community PostgreSQL** binary. Aurora is a **PostgreSQL-comp
 - *"How do you pool connections?"* → RDS Proxy (managed), or PgBouncer on the app side.
 - *"How do you monitor?"* → Performance Insights (load by wait event + top SQL) + CloudWatch + Enhanced Monitoring.
 - *"Superuser?"* → No true superuser on RDS/Aurora — you get `rds_superuser`.
+- *"How do you survive a whole region going down?"* → Aurora **Global Database**: storage-layer replication to secondary regions with <1s lag, promote a secondary in <1 min (region-level DR, unlike Multi-AZ which is AZ-level).
+- *"What's a headless secondary?"* → A Global Database secondary region with **storage but no compute** — cheap DR standby; you add instances at failover (cost vs. RTO trade-off).

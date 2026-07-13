@@ -302,6 +302,40 @@ WHERE NOT EXISTS (SELECT 1 FROM subscriptions s WHERE s.customer_id = c.id);
 
 Performance-wise, modern PostgreSQL optimizes `EXISTS` and `IN`-subqueries into semi-joins, so pick the one that's **correct and readable** first.
 
+### Semi-join and anti-join (what the planner actually does)
+
+A **semi-join** returns left rows that have **at least one** match on the right — **once each**, with **no right-side columns**. It answers *"does a related row exist?"* rather than *"combine the rows."* An **anti-join** is the opposite: left rows with **no** match. There's no `SEMI JOIN` keyword — you write `EXISTS`/`IN` (semi) and `NOT EXISTS` (anti), and the planner runs them as semi/anti-joins. In `EXPLAIN` you'll literally see nodes like `Hash Semi Join`, `Hash Anti Join`, or `Nested Loop Semi Join`.
+
+The key difference from a plain inner join: a semi-join does **not** duplicate a left row when there are multiple matches. Alice has two orders, so an inner join lists her twice, but `EXISTS` lists her once:
+
+```sql
+-- INNER JOIN: Alice appears twice (one row per matching order)
+SELECT c.name FROM cust c JOIN orders o ON o.cust_id = c.id;   -- Alice, Alice, Bob, Carol
+
+-- SEMI-JOIN (EXISTS): Alice appears once ("has an order?")
+SELECT c.name FROM cust c
+WHERE EXISTS (SELECT 1 FROM orders o WHERE o.cust_id = c.id);   -- Alice, Bob, Carol
+```
+
+> Common mistake: using `JOIN` + `DISTINCT` to dedupe when you really wanted a semi-join. `EXISTS` is clearer and lets the planner stop at the first match instead of joining everything then deduping.
+
+### Which performs best: EXISTS vs IN vs ANY vs LEFT JOIN/IS NULL?
+
+In modern PostgreSQL these are usually planned **identically**, so optimize for **correctness and readability** — then confirm with `EXPLAIN (ANALYZE, BUFFERS)`.
+
+**"Has a match" (semi-join):** `EXISTS`, `IN (subquery)`, and `= ANY (subquery)` all typically produce the **same Semi Join** plan → performance is a wash.
+- Prefer `EXISTS` for correlated/multi-column inner queries; `IN` reads cleanest for a single column.
+
+**"No match" (anti-join):**
+
+| Approach | Plan | Verdict |
+|----------|------|---------|
+| **`NOT EXISTS`** | Anti Join | **Best default** — NULL-safe, stops at first match, clear |
+| `LEFT JOIN ... WHERE r.key IS NULL` | often same Anti Join | Same perf frequently, but **fragile**: the `IS NULL` must be on a **non-nullable / join** column, else wrong results; less readable |
+| `NOT IN (subquery)` | blocked / poor | **Avoid** — one NULL in the subquery makes it return **zero rows** (three-valued logic) *and* prevents the anti-join optimization |
+
+Bottom line: `EXISTS`/`IN`/`=ANY` are equivalent for existence checks; use `NOT EXISTS` for anti-joins; never use `NOT IN` against a subquery that can contain NULLs. Always verify the join node type and row estimates with `EXPLAIN ANALYZE` on real data (and make sure stats are fresh via `ANALYZE`).
+
 **Lab — who has ordered, and who hasn't:**
 
 ```sql
@@ -590,6 +624,7 @@ Unlike `GROUP BY`, every customer row is kept — `region_total` is repeated on 
 - **WHERE vs HAVING:** rows-before-grouping vs groups-after-aggregation.
 - **LEFT JOIN + WHERE on the right table** accidentally becomes an INNER JOIN — filter in `ON`.
 - **Anti-join:** prefer `NOT EXISTS` over `NOT IN` (NULL safety).
+- **Semi/anti-join:** `EXISTS`/`IN`/`=ANY` all plan the same (Semi Join) — pick for readability; `NOT EXISTS` for anti-join. `LEFT JOIN + IS NULL` works but is fragile; `EXISTS` won't duplicate left rows like a plain join. Confirm with `EXPLAIN ANALYZE`.
 - **`UNION` vs `UNION ALL`:** `UNION` dedupes (extra cost); use `ALL` when you can.
 - **Window functions** aggregate without collapsing rows.
 - **`COUNT(*)` vs `COUNT(col)`:** the latter skips NULLs.
