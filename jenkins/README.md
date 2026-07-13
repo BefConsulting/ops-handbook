@@ -9,6 +9,10 @@ CI/CD notes and pipeline definitions.
 | `docs/` | Concepts, pipeline syntax, agents, best practices |
 | `pipelines/` | `Jenkinsfile` examples and shared library snippets |
 
+## Docs
+
+- [github-actions-vs-jenkins.md](docs/github-actions-vs-jenkins.md) — CI/CD tool comparison and how to choose
+
 ## Suggested topics for `docs/`
 
 - Declarative vs scripted pipelines; `Jenkinsfile` anatomy
