@@ -17,6 +17,7 @@ databases/
 
 | Guide | What's inside |
 |-------|---------------|
+| [docs/sql-basics.md](docs/sql-basics.md) | Core SQL — join types, aggregates, `GROUP BY`/`HAVING`, subqueries, `EXISTS`/`IN`, set ops, window functions |
 | [docs/deep-dive.md](docs/deep-dive.md) | The big one: internals (MVCC / WAL / vacuum / bloat / planner), performance tuning, HA & scaling, security |
 | [docs/performance-analysis.md](docs/performance-analysis.md) | Where to start, what to check — the full investigation funnel |
 | [docs/linux.md](docs/linux.md) | Linux host/kernel tuning — sysctl, memory/overcommit, swappiness, dirty-page writeback, THP/huge pages, storage, CPU, limits |
@@ -29,6 +30,7 @@ databases/
 | [docs/cache.md](docs/cache.md) | Cold vs warm cache, and how it shows up in `EXPLAIN` buffers |
 | [docs/ha-and-dr.md](docs/ha-and-dr.md) | Replication, failover automation (Patroni/DCS), disaster recovery & PITR |
 | [docs/patroni.md](docs/patroni.md) | Hands-on: build a 3-node Patroni HA cluster locally on macOS |
+| [docs/aws-rds-aurora.md](docs/aws-rds-aurora.md) | Managed PostgreSQL on AWS — RDS vs Aurora, HA/replicas, backups/PITR, monitoring, RDS Proxy |
 
 ## Hands-on lab (`lab/`)
 
