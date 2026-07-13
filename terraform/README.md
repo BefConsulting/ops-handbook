@@ -9,6 +9,10 @@ Infrastructure-as-Code notes and reusable modules.
 | `docs/` | Concepts, workflow, state management, best practices |
 | `modules/` | Reusable, versioned Terraform modules |
 
+## Docs
+
+- [cicd-plan-apply.md](docs/cicd-plan-apply.md) — plan-on-PR / apply-on-merge in GitHub Actions & Jenkins, RDS/Aurora upgrades as code, and where TFE fits
+
 ## Suggested topics for `docs/`
 
 - Core workflow (`init` / `plan` / `apply` / `destroy`) and how `plan` is read

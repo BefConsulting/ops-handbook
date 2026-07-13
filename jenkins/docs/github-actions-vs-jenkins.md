@@ -2,7 +2,7 @@
 
 A practical comparison of the two most common CI/CD tools — how each works, where each wins, and how to choose.
 
-**See also:** [../README.md](../README.md) · [../../terraform/](../../terraform/) · [../../ansible/](../../ansible/)
+**See also:** [../README.md](../README.md) · [../../terraform/docs/cicd-plan-apply.md](../../terraform/docs/cicd-plan-apply.md) (worked plan/apply pipelines in both tools) · [../../ansible/](../../ansible/)
 
 ---
 
