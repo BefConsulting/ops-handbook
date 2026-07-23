@@ -74,17 +74,81 @@ Structure every behavioral answer so it's concrete and lands the point.
 
 ---
 
+# AWS / Aurora-focused stories
+
+Use these when the conversation turns cloud/managed-database (Pat — Platform, Nate — Infrastructure will likely probe AWS depth). Same STAR rules apply. If you haven't run every one of these in production, frame them honestly as "here's how I approach / have approached this" rather than inventing specifics.
+
+## Story 6 — Security (locking down an Aurora PostgreSQL cluster)
+
+- **S** — Inheriting an Aurora PostgreSQL cluster, I found weak security posture: a shared app password stored in several places, the DB reachable from a broad security-group range, and no query-level auditing — a real risk for a billing/multi-tenant system.
+- **T** — Move to least-privilege, credential-free access and auditable activity **without** an outage or app rewrite.
+- **A** — Tightened the **security group** to only the app subnets/SG (no broad CIDRs) and kept the cluster in **private subnets**. Confirmed **KMS encryption at rest** and enforced **TLS in transit** (`rds.force_ssl`). Replaced the shared password with **IAM database authentication** so the app fetches short-lived tokens — no long-lived secrets in config; remaining secrets moved to Secrets Manager with rotation. Applied **least-privilege roles** (app role limited to the schemas/tables it needs, no superuser). Enabled **`pgaudit`** via the DB parameter group and shipped logs to CloudWatch for an audit trail. Staged every change in non-prod and rolled out in a maintenance window.
+- **R** — Eliminated static DB credentials, shrank the network exposure to a single path, and gained per-statement auditing — materially better posture for a compliance-sensitive platform, with zero downtime. Lesson: on managed databases you still own the security model (network, IAM, roles, audit); AWS only secures the substrate.
+
+*Also answers: "security mindset," "handling sensitive/regulated data," "least privilege."*
+
+---
+
+## Story 7 — High availability & DR (Aurora Global Database with a headless secondary)
+
+- **S** — A billing-critical platform needed to survive not just an AZ failure but a **full region** outage, with a defensible RPO/RTO — and finance wanted the DR cost kept sane.
+- **T** — Design cross-region DR that meets the recovery targets without paying for a full idle copy of compute.
+- **A** — Kept Multi-AZ for AZ-level resilience, then added an **Aurora Global Database** replicating at the storage layer to a second region with **sub-second lag**. To control cost I ran the secondary **headless** (storage kept in sync, **no compute**) — we pay for replicated storage, not idle instances, and add instances only at failover. Pre-created **matching custom parameter groups in every region** (managed in Terraform) so the promoted region wouldn't come up on defaults, and made sure **`rds.global_db_rpo`** and upgrade procedures were documented (major = operate on the global cluster; minor = temporarily add an instance to the headless secondary). Ran a **managed failover drill** and wrote a promotion runbook.
+- **R** — Region-level DR with ~1s RPO and a promote-in-minutes RTO, at a fraction of a hot-standby's cost. The drill proved the runbook and surfaced the parameter-group symmetry requirement before it could bite us in a real event. Lesson: HA is a set of deliberate trade-offs (AZ vs region, hot vs headless = cost vs RTO), and DR you haven't rehearsed isn't DR.
+
+*Also answers: "designing for resilience," "cost/reliability trade-offs," "thinking at scale."*
+
+---
+
+## Story 8 — Reliability (taming failover connection storms with RDS Proxy)
+
+- **S** — During Aurora failovers (and one traffic spike), the app opened connections faster than the new writer could absorb; we hit connection limits and saw errors that outlasted the ~30s failover itself.
+- **T** — Make failovers and load spikes a non-event for the application layer.
+- **A** — Root cause was the app connecting **directly** to the cluster endpoint with no pooling, so every pod reconnected at once. Introduced **RDS Proxy** in front of the cluster: it **pools and multiplexes** connections and, crucially, **holds client connections during failover** and routes them to the new writer, smoothing the blip. Right-sized `max_connections` and the proxy's pool, and pointed the app at the proxy endpoint. Validated by triggering a failover under load and watching error rates.
+- **R** — Failovers became nearly invisible to users — connection errors during a forced failover dropped to near zero, and the DB stopped hitting connection ceilings under spikes. Lesson: connection management is a reliability feature, not just performance; the endpoint the app talks to matters as much as the database behind it.
+
+*Also answers: "on-call/pressure," "reducing incident blast radius," "connection pooling."*
+
+---
+
+## Story 9 — Performance tuning (Performance Insights + a hot query on Aurora)
+
+- **S** — Aurora CPU was pinned during peak hours and API latency crept up; CloudWatch showed high load but not *why*.
+- **T** — Find the true bottleneck and fix it without over-provisioning the instance.
+- **A** — Opened **Performance Insights** and read **DB load by wait event** — it wasn't raw CPU compute but a mix of a top SQL statement dominating load plus lock waits. Drilled into the top query (PI's top-SQL, the managed equivalent of `pg_stat_statements`), pulled `EXPLAIN (ANALYZE, BUFFERS)`, and found a missing composite index causing repeated large scans; a secondary issue was a chatty query pattern from the app. Added the index, nudged the app to batch, refreshed stats, and confirmed the wait-event profile flattened in PI. Resisted the easy "just scale the instance up" fix.
+- **R** — Peak CPU dropped substantially and p95 latency returned to target — **without** a bigger (more expensive) instance class. Set a PI/CloudWatch alarm on DB load and top-SQL regressions. Lesson: managed databases give you great signal (PI wait events) — diagnose the bottleneck before throwing hardware at it.
+
+*Also answers: "data-driven tuning," "cost-aware engineering," "using cloud-native tooling."*
+
+---
+
+## Story 10 — Incident response (recovering from a bad data change with Backtrack/PITR)
+
+- **S** — A faulty migration/bulk update corrupted a chunk of rows in an Aurora PostgreSQL database mid-day; the app was serving wrong data to customers.
+- **T** — Restore correct data fast, with minimal data loss and clear communication, then prevent a repeat.
+- **A** — Ran the incident: declared it, assessed blast radius (which tables/time window), and stopped further writes to the affected path. Because the cluster had **Aurora Backtrack** enabled, I could **rewind the cluster in place** to just before the bad change — far faster than a full snapshot restore — after confirming the target timestamp; where Backtrack didn't apply I used **PITR** (restore-to-timestamp into a new cluster) and reconciled. Verified data correctness before reopening writes and kept stakeholders updated throughout. Afterward: added a pre-migration **snapshot + `--allow-major-version-upgrade`/guardrails**, required migrations to go through the reviewed **plan-on-PR / apply-on-merge** pipeline with `prevent_destroy` on stateful resources, and wrote a data-recovery runbook.
+- **R** — Restored correct data within the recovery window with minimal loss and clear comms; the process changes (peer-reviewed migrations + backtrack/PITR runbook) meant the next risky change had a rehearsed safety net. Lesson: recoverability is a feature you configure **before** the incident — Backtrack/PITR only help if they're enabled and practiced.
+
+*Also answers: "incident command," "staying calm under pressure," "blameless post-incident improvement."*
+
+---
+
 ## Other likely behavioral questions (map to a story above)
 
 | Question | Lead with |
 |----------|-----------|
-| "Walk me through a production incident." | Story 1 or 2 |
+| "Walk me through a production incident." | Story 1, 2, or 10 |
 | "A time you disagreed with someone." | Story 3 |
 | "A mistake you made." | Story 4 |
 | "How do you prioritize when everything's urgent?" | Stabilize-first mindset (Story 1/2) |
 | "A time you improved a process / automated something." | Story 4 or 5 |
-| "How do you handle on-call / pressure?" | Story 2 |
+| "How do you handle on-call / pressure?" | Story 2 or 8 |
 | "How do you explain complex DB issues to non-technical folks?" | Story 3 (evidence + shared conclusion) |
+| "Tell me about your AWS / cloud database experience." | Story 6–10 (pick per theme) |
+| "How do you secure a database?" | Story 6 |
+| "Design for high availability / DR." | Story 7 |
+| "How do you approach performance tuning in the cloud?" | Story 9 |
+| "How do you recover from data loss / a bad change?" | Story 10 |
 
 ---
 
