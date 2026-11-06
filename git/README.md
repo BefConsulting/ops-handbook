@@ -4,11 +4,24 @@ Practical Git commands for day-to-day branch work. Examples assume a feature bra
 
 ## The Basic Model
 
-- A **commit** is a snapshot with a parent commit (or parents).
+### References and History
+
+- A **commit** is a saved snapshot of staged changes. It exists locally until pushed.
 - A **branch** is a movable name pointing to a commit.
-- `HEAD` identifies the commit currently checked out. Usually it points to the tip of the current branch; in a detached-HEAD state it points directly to a commit instead.
-- The **working tree** contains your checked-out files. The **index** (staging area) contains the changes that will go into the next commit.
-- `origin/main` is your local reference to the latest `main` branch state fetched from `origin`. It does not update until you fetch.
+- `HEAD` identifies the current commit. Usually it points to the tip of the checked-out branch; in detached-HEAD state it points directly to a commit.
+- `origin` is the conventional name for a remote repository. `origin/main` is your local record of that remote's `main` branch, updated by `git fetch`.
+
+### File States
+
+- **Tracked**: Git knows the file because it is committed or in the index.
+- **Untracked**: a new file Git has not been told to track. `git add` starts tracking it and stages its current contents.
+- **Unstaged**: edits to a tracked file that are not in the index yet.
+- **Staged**: changes selected in the index for the next commit. Use `git add` to stage and `git restore --staged <file>` to unstage.
+
+### History and Change Commands
+
+- `git log` lists commits; `git show <commit>` displays a commit and its changes.
+- `git diff` shows tracked unstaged changes; `git diff --cached` shows staged changes. `git diff <commit-a> <commit-b>` compares two commits.
 
 ## Start a Work Session
 
@@ -51,6 +64,25 @@ This assumes your feature branch should be based on `main`. If it tracks a diffe
 
 ## Commit and Push Changes
 
+### Staging and Committing
+
+Staging selects which changes go into the next commit. Committing saves that staged snapshot in your local repository; it does not push it to GitHub.
+
+New untracked files appear in `git status`, but not in regular diffs until added (or compared explicitly with `git diff --no-index`).
+
+```text
+Working tree                 Staging area                 Local repository
+(edit files) -- git add -->  (selected changes) -- git commit --> [commit]
+```
+
+For example, `git status --short` may show:
+
+```text
+ M README.md    # tracked, modified, unstaged
+A  notes.md     # new file, staged
+?? draft.txt    # untracked
+```
+
 ```bash
 git status --short          # see changed files
 git diff                    # review unstaged changes
@@ -91,6 +123,36 @@ git config pull.rebase true
 ```
 
 Use `--global` to apply the setting to all repositories for your user. You can also choose rebase for a single pull with `git pull --rebase`.
+
+### Rebase vs. Merge
+
+Suppose `feature` and `main` have both advanced from commit `B`:
+
+```text
+	D---E  feature
+     /
+A---B---C    main
+```
+
+Rebase replays the feature changes on top of `main`. The rebased commits get new IDs (`D'` and `E'`), and the history is linear:
+
+```text
+A---B---C  main
+	   \
+	    D'---E'  feature
+```
+
+Merge combines both histories with a merge commit. The original feature commits remain unchanged:
+
+```text
+	D---E----.
+     /          \
+A---B---C--------M  feature
+				^
+				main before merge
+```
+
+Use rebase to keep your own feature branch current with `main`; use merge when you want to preserve the branch history and record where the histories came together. Avoid rebasing commits that others are already using.
 
 ## Inspect History and Changes
 
