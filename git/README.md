@@ -2,6 +2,34 @@
 
 Practical Git commands for day-to-day branch work. Examples assume a feature branch named `test-branch` and a remote named `origin`; replace those with your branch and remote as needed.
 
+## Contents
+
+- [The Basic Model](#the-basic-model)
+  - [References and History](#references-and-history)
+  - [File States](#file-states)
+  - [History and Change Commands](#history-and-change-commands)
+- [Check Your Identity](#check-your-identity)
+- [Start a Work Session](#start-a-work-session)
+- [Commit and Push Changes](#commit-and-push-changes)
+  - [Staging and Committing](#staging-and-committing)
+- [Fetch and Rebase Workflow](#fetch-and-rebase-workflow)
+  - [Rebase vs. Merge](#rebase-vs-merge)
+- [Inspect History and Changes](#inspect-history-and-changes)
+- [Amend the Latest Commit](#amend-the-latest-commit)
+- [Edit Older Commits with Interactive Rebase](#edit-older-commits-with-interactive-rebase)
+  - [Add Changes to an Older Commit](#add-changes-to-an-older-commit)
+- [Drop Commits](#drop-commits)
+- [Undo Commits](#undo-commits)
+  - [Commits not pushed yet](#commits-not-pushed-yet)
+  - [Commits already pushed](#commits-already-pushed)
+  - [Undo the changes to one file](#undo-the-changes-to-one-file)
+  - [Recover from a bad reset](#recover-from-a-bad-reset)
+- [Resolve Rebase Conflicts](#resolve-rebase-conflicts)
+- [Quick Safety Checks](#quick-safety-checks)
+- [Tags and GitHub Releases](#tags-and-github-releases)
+  - [Create a release from `main`](#create-a-release-from-main)
+  - [Create a prerelease from a PR branch](#create-a-prerelease-from-a-pr-branch)
+
 ## The Basic Model
 
 ### References and History
@@ -22,6 +50,32 @@ Practical Git commands for day-to-day branch work. Examples assume a feature bra
 
 - `git log` lists commits; `git show <commit>` displays a commit and its changes.
 - `git diff` shows tracked unstaged changes; `git diff --cached` shows staged changes. `git diff <commit-a> <commit-b>` compares two commits.
+
+## Check Your Identity
+
+Git records a name and email on every commit. Check the values that apply in the current repository:
+
+```bash
+git config user.name
+git config user.email
+```
+
+Settings can come from more than one place. A repository-level value overrides the global one. To see each value and the file it comes from:
+
+```bash
+git config --list --show-origin | grep user
+```
+
+To check or change one scope only:
+
+```bash
+git config --global user.email                   # read from ~/.gitconfig
+git config --local user.email                    # read from this repo's .git/config
+git config --global user.email "you@example.com" # set for all repositories
+git config user.email "you@example.com"          # set for the current repository only
+```
+
+Changing the config affects only new commits. Commits you already made keep the old identity. To fix the latest commit, run `git commit --amend --reset-author --no-edit`.
 
 ## Start a Work Session
 
@@ -246,6 +300,56 @@ git rebase -i HEAD~N
 ```
 
 Save and close the editor to replay the remaining commits. Dropping a commit removes its changes from the branch history and may cause conflicts in later commits. Use `git rebase --abort` to cancel if the result is not right. If the dropped commits were already pushed, use `git push --force-with-lease` after reviewing the new history.
+
+## Undo Commits
+
+Which approach to use depends on whether the commits have been pushed.
+
+### Commits not pushed yet
+
+Use `git reset` to move the branch back. The mode decides what happens to the changes from the undone commits:
+
+```bash
+git reset --soft HEAD~1   # undo the commit, keep its changes staged
+git reset HEAD~1          # undo the commit, keep its changes as unstaged edits
+git reset --hard HEAD~1   # undo the commit and discard its changes
+```
+
+Use `HEAD~N` to undo the last `N` commits, or a commit hash to reset the branch to that commit. `--hard` also discards any uncommitted work in the working tree, so check `git status` first.
+
+### Commits already pushed
+
+Prefer `git revert`. It adds a new commit that reverses the changes and leaves existing history intact, so it is safe on shared branches such as `main`:
+
+```bash
+git revert <commit>
+git push
+```
+
+On a feature branch that only you use, you can rewrite history instead:
+
+```bash
+git reset --hard HEAD~1
+git push --force-with-lease origin test-branch
+```
+
+### Undo the changes to one file
+
+Restore a file to the version it had before the latest commit, then commit the restored file:
+
+```bash
+git restore --source=HEAD~1 -- path/to/file
+git commit -m "Revert changes to path/to/file"
+```
+
+### Recover from a bad reset
+
+`git reflog` lists every commit `HEAD` has pointed to, including commits that are no longer on any branch. Find the hash from before the reset and move the branch back to it:
+
+```bash
+git reflog
+git reset --hard <commit>
+```
 
 ## Resolve Rebase Conflicts
 
