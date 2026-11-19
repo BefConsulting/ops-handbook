@@ -144,7 +144,7 @@ SELECT slot_name, slot_type, active, wal_status,
 FROM pg_replication_slots;
 ```
 - **`active = false`** on a slot = **danger**: it's retaining WAL for a consumer that isn't there → `pg_wal` grows until the disk fills.
-- **`wal_status = 'lost'`** = required WAL was already removed; the replica can't catch up.
+- **`wal_status = 'lost'`** = required WAL was already removed. A physical standby can still catch up from the archive if `restore_command` works; a logical subscriber can't and needs a full resync. Details in [wal-and-checkpoints.md §7](wal-and-checkpoints.md#7-wal-retention-for-replication--wal_keep_size-and-max_slot_wal_keep_size).
 
 (Ready-to-run versions in [../scripts/replication.sql](../scripts/replication.sql).)
 
@@ -157,7 +157,7 @@ FROM pg_replication_slots;
 |---------|--------------|-----|
 | **Replication lag growing** | Standby can't keep up: slow disk/CPU, heavy read queries, single-threaded replay bottleneck, large transactions | Faster standby storage; offload heavy queries; check `recovery_min_apply_delay`; consider fewer big transactions |
 | **`pg_wal` filling on primary** | Inactive replication slot or failed `archive_command` retaining WAL | Find inactive slots (`pg_replication_slots`); drop orphaned slot (`pg_drop_replication_slot`); fix archiving |
-| **Standby fell too far behind, can't catch up** | Required WAL recycled before sent (`wal_status='lost'`, no slot) | Use a **replication slot** to retain WAL; or re-sync standby (`pg_basebackup` / `pg_rewind`) |
+| **Standby fell too far behind, can't catch up** | Required WAL removed before it was sent: no slot and `wal_keep_size` exceeded, or the slot was invalidated by `max_slot_wal_keep_size` (`wal_status='lost'`) | Make sure `restore_command` can fetch from the WAL archive (the standby then catches up by itself); use a **replication slot**; otherwise re-sync the standby (`pg_basebackup` / `pg_rewind`). See [wal-and-checkpoints.md §7](wal-and-checkpoints.md#7-wal-retention-for-replication--wal_keep_size-and-max_slot_wal_keep_size) |
 | **Standby queries canceled** (`ERROR: canceling statement due to conflict with recovery`) | Long read query on standby conflicts with WAL replay (vacuum cleanup) | Raise `max_standby_streaming_delay`; or `hot_standby_feedback = on` (trades bloat on primary) |
 | **Sync replication stalls all commits** | The only sync standby is down → primary waits forever | Configure multiple sync candidates (`synchronous_standby_names`), or use quorum `ANY n (...)` |
 | **Failover didn't trigger** | DCS quorum lost, health-check thresholds too lax, no eligible standby | Check DCS health (etcd/Consul); tune Patroni `ttl`/`loop_wait`/`retry_timeout`; ensure a caught-up standby exists |

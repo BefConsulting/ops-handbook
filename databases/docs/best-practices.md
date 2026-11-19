@@ -95,7 +95,8 @@ Moved to its own guide → **[linux.md](linux.md)**. It defines each kernel/host
 | `max_wal_senders` | `10` | Max concurrent WAL-sender processes (one per streaming replica or base backup). |
 | `max_replication_slots` | `10` | Max replication slots (one per standby/subscriber) that track how far each consumer has read. |
 | `hot_standby` | `on` | Allows read-only queries on a standby while it replays WAL. |
-| `max_slot_wal_keep_size` | bound it | Caps how much WAL an inactive slot can pin — prevents a dead replica's slot from filling `pg_wal` and stopping the primary. |
+| `max_slot_wal_keep_size` | below free space on the `pg_wal` volume | Caps how much WAL **any** slot (physical or logical) can pin — prevents a dead replica's or subscriber's slot from filling `pg_wal` and stopping the primary. Past the cap the slot becomes `lost`. ([details](wal-and-checkpoints.md#7-wal-retention-for-replication--wal_keep_size-and-max_slot_wal_keep_size)) |
+| `wal_keep_size` | small (or `0`) when slots are used | Floor of recent WAL always kept for standbys streaming **without** a slot. Uses that much disk all the time, even when every standby is caught up. |
 | `archive_mode` + `archive_command` | `on` + pgBackRest/WAL-G | Ships completed WAL segments to archive storage — required for Point-In-Time Recovery. |
 
 ### Security essentials ([details](deep-dive.md) §4)
